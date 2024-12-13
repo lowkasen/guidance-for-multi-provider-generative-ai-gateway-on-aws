@@ -373,7 +373,7 @@ e.g. priority=0 > priority=2000
 
 So if you have traffic you want prioritized over all others, set those calls to priority=0, and the other calls to priority>0
 
-There is currently no way to set this priority on the server side without an enterprise plan. So you must handle this on the client side for now.
+There is currently no way to set this priority on the server side. So you must handle this on the client side for now.
 
 #### Usage Instructions
 
