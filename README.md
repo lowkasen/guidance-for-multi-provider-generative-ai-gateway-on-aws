@@ -15,7 +15,6 @@ It also provides additional features on top of LiteLLM such as a Bedrock Interfa
 1. Docker
 2. AWS CLI
 3. CDK
-4. More stuff I'm probably forgetting (Please open a PR if you find something missing 😊)
 
 ### Environment tested and confirmed
 
