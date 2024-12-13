@@ -56,7 +56,7 @@ CDK: 2.170.0
 
 `model_name`: this is the model's public name. You can set it to whatever you like. When someone is calling your model using the OpenAI client, they will use this value for the model id. By default, the `model_name` is set to the model id from each provider. 
 
-If a model id is used by two different providers, we instead used <provider>/<model_id> as the `model_name`. For example, the `github` provider shares a model id with the `groq` provider. So, to avoid the conflict, we use `github/llama-3.1-8b-instant` instead of just `llama-3.1-8b-instant`
+If a model id is used by two different providers, we instead used `<provider>/<model_id>` as the `model_name`. For example, the `github` provider shares a model id with the `groq` provider. So, to avoid the conflict, we use `github/llama-3.1-8b-instant` instead of just `llama-3.1-8b-instant`
 
 
 `litellm_params`: This is the full list of additional parameters sent to the model. For most models, this will only be `model` which is the model id used by the provider. Some providers such as `azure` need additional parameters, which are documented in `config/default-config.yaml`. 
