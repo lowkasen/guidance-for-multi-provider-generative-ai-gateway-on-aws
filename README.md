@@ -1,4 +1,4 @@
-# AWS LiteLLM ECS
+# AWS GenAI Gateway
 
 Project ACTIVE as of Dec 13, 2024
 
