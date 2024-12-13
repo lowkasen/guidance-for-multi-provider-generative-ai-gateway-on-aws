@@ -262,7 +262,7 @@ https://litellm-api.up.railway.app/#/Internal%20User%20management/new_user_user_
 
 Use this to create a new INTERNAL user. Internal Users can access LiteLLM Admin UI to make keys. This creates a new user and generates a new api key for the new user. The new api key is returned.
 
-If you don't specify a budget, the value in `litellm_settings.max_internal_user_budget` and `litellm_settings.internal_user_budget_duration`
+If you don't specify a budget, the values in `litellm_settings.max_internal_user_budget` and `litellm_settings.internal_user_budget_duration` are applied to the user.
 
 ##### Create User with default budget defined in your config.yaml:
 ```
