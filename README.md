@@ -379,7 +379,18 @@ There is currently no way to set this priority on the server side. So you must h
 
 Using LiteLLM is practically Identical to using OpenAI, you just need to replace the baseurl and the api key with your LiteLLM ones
 
-For examples on how to use LiteLLM, chekck out the ReadMe on the original repo: https://github.com/BerriAI/litellm
+```
+import openai # openai v1.0.0+
+client = openai.OpenAI(api_key="anything",base_url="https://<Your-Proxy-Endpoint>") # set proxy to base_url
+response = client.chat.completions.create(model="anthropic.claude-3-5-sonnet-20240620-v1:0", messages = [
+    {
+        "role": "user",
+        "content": "this is a test request, write a short poem"
+    }
+])
+
+print(response)
+```
 
 #### Bedrock interface
 
