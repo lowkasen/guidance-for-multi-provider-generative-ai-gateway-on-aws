@@ -1,6 +1,6 @@
 # AWS LiteLLM ECS
 
-Project ACTIVE as of Nov 22, 2024
+Project ACTIVE as of Dec 13, 2024
 
 ## Project Overview
 
