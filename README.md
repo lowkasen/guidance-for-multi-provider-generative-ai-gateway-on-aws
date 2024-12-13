@@ -6,7 +6,7 @@ Project ACTIVE as of Dec 13, 2024
 
 This project provides a simple CDK deployment of LiteLLM into ECS on AWS. It aims to be pre-configured with defaults that will allow most users to quickly get started with LiteLLM.
 
-It also provides additional features on top of LiteLLM such as a Bedrock Interface (instead of the default OpenAI interface).
+It also provides additional features on top of LiteLLM such as an AWS Bedrock Interface (instead of the default OpenAI interface).
 
 ## How to deploy
 
