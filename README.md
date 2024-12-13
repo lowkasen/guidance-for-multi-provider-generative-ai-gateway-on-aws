@@ -97,7 +97,7 @@ For AWS Bedrock Models, you can also use this to specify a `guardrailConfig` to 
 
 ###### A/B testing and Load Balancing
 
-To do A/B testing with two differnt models, do the following:
+To do A/B testing with two different models, do the following:
 1. Define two different models with the same `model_name`
 2. Point them each to one of the two different models you want to A/B test
 3. Set the `weight` for each of them to determine the percentage of traffic you want going to each model
