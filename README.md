@@ -467,6 +467,8 @@ def create_bedrock_client():
     return client
 ```
 
+Once that client is initialized, you can use it exactly as you would use boto3 to call AWS Bedrock directly
+
 ## Open Source Library
 
 For detailed information about the open source libraries used in this application, please refer to the [ATTRIBUTION](ATTRIBUTION.md) file.
