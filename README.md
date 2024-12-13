@@ -175,7 +175,7 @@ You can explore alternative routing strategies here: https://docs.litellm.ai/doc
 
 You can also configure fallbacks for an entire `model_name`. If all models in a given `model_name` are failing, you can configure a final fallback.
 
-Let's say you love Claude 3.5 sonnet, but occationally your users perform a query that overwhelm it's context window size. You can configure a fallback for that scenario. All requests will go to Claude 3.5 Sonnet, but if they are too large, they will go to gemini which has a larger context window
+Let's say you love Claude 3.5 sonnet, but occationally your users perform a query that overwhelms its context window size. You can configure a fallback for that scenario. All requests will go to Claude 3.5 Sonnet, but if they are too large, they will go to gemini which has a larger context window
 
 ```
 router_settings:
