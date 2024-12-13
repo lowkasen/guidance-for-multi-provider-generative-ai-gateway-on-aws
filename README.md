@@ -415,6 +415,58 @@ Run the script:
 `python test-middleware.py`
 
 
+The key part of this script is the initialization of the boto3 client, like this:
+
+```
+def create_bedrock_client():
+    """
+    Creates a Bedrock client with custom endpoint and authorization header.
+    Uses environment variables for configuration.
+
+    Required environment variables:
+    - API_ENDPOINT: Custom Bedrock endpoint URL
+    - API_KEY: Authorization bearer token
+    - AWS_REGION: AWS region
+
+    Returns:
+        boto3.client: Configured Bedrock client
+    """
+
+    # Get configuration from environment variables
+    endpoint = os.getenv("API_ENDPOINT")
+    api_key = os.getenv("API_KEY")
+    region = os.getenv("AWS_REGION")
+
+    if not all([endpoint, api_key, region]):
+        raise ValueError(
+            "Missing required environment variables: API_ENDPOINT, API_KEY, AWS_REGION"
+        )
+
+    # Initialize session and configure client
+    session = boto3.Session()
+    client_config = Config(
+        signature_version=UNSIGNED,  # Disable SigV4 signing
+        retries={"max_attempts": 10, "mode": "standard"},
+    )
+
+    # Create the Bedrock client
+    client = session.client(
+        "bedrock-runtime",
+        endpoint_url=endpoint,
+        config=client_config,
+        region_name=region,
+    )
+
+    # Define authorization header handler
+    def add_authorization_header(request, **kwargs):
+        request.headers["Authorization"] = f"Bearer {api_key}"
+
+    # Register the event handler
+    client.meta.events.register("request-created.*", add_authorization_header)
+
+    return client
+```
+
 ## Open Source Library
 
 For detailed information about the open source libraries used in this application, please refer to the [ATTRIBUTION](ATTRIBUTION.md) file.
