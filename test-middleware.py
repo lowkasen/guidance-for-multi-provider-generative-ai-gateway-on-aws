@@ -2,6 +2,7 @@ import boto3
 import os
 from botocore.client import Config
 from botocore import UNSIGNED
+from typing import Generator, Dict, Any
 
 
 def create_bedrock_client():
@@ -17,8 +18,6 @@ def create_bedrock_client():
     Returns:
         boto3.client: Configured Bedrock client
     """
-
-    # Get configuration from environment variables
     endpoint = os.getenv("API_ENDPOINT")
     api_key = os.getenv("API_KEY")
     region = os.getenv("AWS_REGION")
@@ -53,27 +52,63 @@ def create_bedrock_client():
     return client
 
 
-def send_message(client, message, model_id="anthropic.claude-3-sonnet-20240229-v1:0"):
+def send_message_stream(
+    client,
+    message: str,
+    model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0",
+    max_tokens: int = 1000,
+    temperature: float = 0.7,
+) -> Generator[Dict[str, Any], None, None]:
     """
-    Sends a message to the Bedrock Converse API.
+    Sends a message to the Bedrock Converse API with streaming response.
 
     Args:
         client: Configured Bedrock client
         message (str): Message to send
         model_id (str): ID of the model to use
+        max_tokens (int): Maximum number of tokens to generate
+        temperature (float): Temperature for response generation
 
-    Returns:
-        dict: API response
+    Yields:
+        dict: Streaming response events
     """
     try:
-        response = client.converse(
+        response = client.converse_stream(
             modelId=model_id,
             messages=[{"role": "user", "content": [{"text": message}]}],
+            inferenceConfig={
+                "maxTokens": max_tokens,
+                "temperature": temperature,
+            },
         )
-        return response
+        print(f"response: {response}")
+        print(f"response['stream']: {response["stream"]}")
+
+        # Process the streaming response
+        for event in response["stream"]:
+            print(f"event: {event}")
+            yield event
+
     except Exception as e:
-        print(f"Error sending message: {str(e)}")
+        print(f"Error in streaming request: {str(e)}")
         raise
+
+
+def process_stream_response(event: Dict[str, Any]) -> str:
+    """
+    Processes a streaming response event and extracts the text content if present.
+
+    Args:
+        event (dict): Streaming response event
+
+    Returns:
+        str: Extracted text content or empty string
+    """
+    if "contentBlockDelta" in event:
+        delta = event["contentBlockDelta"].get("delta", {})
+        if "text" in delta:
+            return delta["text"]
+    return ""
 
 
 def main():
@@ -81,10 +116,44 @@ def main():
         # Create the client
         client = create_bedrock_client()
 
-        # Send a test message
-        response = send_message(client=client, message="Hello, how are you?")
+        # Example of using streaming response
+        print("Sending streaming request...")
+        message = "Write a short story about a robot learning to paint."
 
-        print("API Response:", response)
+        # Accumulate the response
+        full_response = ""
+
+        # Process the streaming response
+        for event in send_message_stream(client, message):
+            print(f"event: {event}")
+            # Handle different event types
+            if "internalServerException" in event:
+                raise Exception(
+                    f"Internal server error: {event['internalServerException']}"
+                )
+            elif "modelStreamErrorException" in event:
+                raise Exception(
+                    f"Model stream error: {event['modelStreamErrorException']}"
+                )
+            elif "validationException" in event:
+                raise Exception(f"Validation error: {event['validationException']}")
+            elif "throttlingException" in event:
+                raise Exception(f"Throttling error: {event['throttlingException']}")
+
+            # Process content
+            content = process_stream_response(event)
+            if content:
+                print(content, end="", flush=True)
+                full_response += content
+
+            # Handle metadata and stop events
+            if "messageStop" in event:
+                print("\n\nStream finished.")
+                print(f"Stop reason: {event['messageStop'].get('stopReason')}")
+            elif "metadata" in event:
+                usage = event["metadata"].get("usage", {})
+                if usage:
+                    print(f"\nToken usage: {usage}")
 
     except Exception as e:
         print(f"Error in main: {str(e)}")

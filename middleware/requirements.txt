@@ -2,3 +2,6 @@ fastapi
 uvicorn
 httpx
 pydantic
+openai
+botocore
+google-crc32c
