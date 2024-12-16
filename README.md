@@ -393,7 +393,7 @@ print(response)
 
 #### Bedrock interface
 
-This deployment has a middleware layer that allows you to use the Bedrock interface via boto3 instead of the OpenAi interface. This requires overriding the `endpoint_url`, and injecting your api key into the authorization header in the request. There is an example script on how to do this, `test-middleware.py`
+This deployment has a middleware layer that allows you to use the Bedrock interface via boto3 instead of the OpenAi interface. This requires overriding the `endpoint_url`, and injecting your api key into the authorization header in the request. There are example scripts on how to do this, test-middleware-synchronous.py` (for synchronous requests) and `test-middleware-streaming.py` (for streaming requests)
 
 To use this script:
 
@@ -411,7 +411,8 @@ Install dependencies:
 
 Run the script:
 
-`python test-middleware.py`
+`python test-middleware-synchronous.py` (for synchronous requests)
+`python test-middleware-streaming.py` (for streaming requests)
 
 
 The key part of this script is the initialization of the boto3 client, like this:
@@ -466,7 +467,7 @@ def create_bedrock_client():
     return client
 ```
 
-Once that client is initialized, you can use it exactly as you would use boto3 to call AWS Bedrock directly
+Once that client is initialized, you can use it exactly as you would use boto3 to call AWS Bedrock directly (currently only supports `converse` and `converse_stream`)
 
 ## Open Source Library
 
