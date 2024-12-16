@@ -6,12 +6,54 @@ from typing import Dict, Any, AsyncGenerator, List, Optional
 from openai import AsyncOpenAI
 import struct
 import google_crc32c
+import zlib
 
 app = FastAPI()
 
 # Since we're in the same container, we can use localhost
 LITELLM_ENDPOINT = "http://localhost:4000"
 LITELLM_CHAT = f"{LITELLM_ENDPOINT}/v1/chat/completions"
+
+
+class CustomEventStream:
+    def __init__(self, messages):
+        self.messages = messages
+        self.position = 0
+
+    def stream(self):
+        while self.position < len(self.messages):
+            yield self.messages[self.position]
+            self.position += 1
+
+
+def create_event_message(payload, event_type_name):
+    header_name = b":event-type"
+    header_name_length = len(header_name)
+    event_name_bytes = event_type_name.encode("utf-8")
+    event_name_length = len(event_name_bytes)
+
+    # Build headers block
+    headers_bytes = (
+        struct.pack("B", header_name_length)
+        + header_name
+        + b"\x07"  # string type
+        + struct.pack(">H", event_name_length)
+        + event_name_bytes
+    )
+
+    headers_length = len(headers_bytes)
+    payload_length = len(payload)
+    total_length = (
+        payload_length + headers_length + 16
+    )  # 16 bytes = prelude(8) + message_crc(4) + prelude_crc(4)
+
+    prelude = struct.pack(">I", total_length) + struct.pack(">I", headers_length)
+    prelude_crc = struct.pack(">I", zlib.crc32(prelude) & 0xFFFFFFFF)
+
+    message_parts = prelude + prelude_crc + headers_bytes + payload
+    message_crc = struct.pack(">I", zlib.crc32(message_parts) & 0xFFFFFFFF)
+
+    return message_parts + message_crc
 
 
 def convert_messages_to_openai(
@@ -124,7 +166,7 @@ async def convert_openai_to_bedrock(openai_response: Dict[str, Any]) -> Dict[str
     # Add stop reason if present
     if "finish_reason" in openai_response["choices"][0]:
         stop_reason_map = {
-            "stop": "stop_sequence",
+            "stop": "end_turn",
             "length": "max_tokens",
             "tool_calls": "tool_use",
             "content_filter": "content_filtered",
@@ -135,118 +177,71 @@ async def convert_openai_to_bedrock(openai_response: Dict[str, Any]) -> Dict[str
     return bedrock_response
 
 
-def map_finish_reason_to_bedrock(finish_reason: str) -> str:
-    stop_reason_map = {
-        "stop": "end_turn",
-        "length": "max_tokens",
-        "function_call": "tool_use",  # OpenAI calls these 'functions', could map to tool use
-        "content_filter": "content_filtered",
-    }
-    return stop_reason_map.get(finish_reason, "end_turn")
-
-
-def encode_event_stream_message(payload: dict, event_type: str) -> bytes:
-    # Convert payload to bytes
-    payload_bytes = json.dumps(payload).encode("utf-8")
-
-    def encode_header(name: bytes, value: bytes):
-        # Header format:
-        # 1 byte: length of name
-        # name bytes
-        # 1 byte: type (7 for string)
-        # 2 bytes: length of value
-        # value bytes
-        return (
-            struct.pack("!B", len(name))
-            + name
-            + struct.pack("!B", 7)  # string type
-            + struct.pack("!H", len(value))
-            + value
-        )
-
-    # Encode the required headers in the correct order
-    headers = (
-        encode_header(b":event-type", event_type.encode("utf-8"))
-        + encode_header(b":content-type", b"application/json")
-        + encode_header(b":message-type", b"event")
-    )
-
-    headers_length = len(headers)
-    # Total length = 4 (total_length) + 4 (headers_length) + 4 (prelude_crc) + headers_length + payload_length + 4 (message_crc)
-    total_length = 4 + 4 + 4 + headers_length + len(payload_bytes) + 4
-
-    # Write the prelude: total_length (4 bytes) + headers_length (4 bytes)
-    prelude = struct.pack("!I", total_length) + struct.pack("!I", headers_length)
-
-    # Compute prelude CRC
-    prelude_crc = google_crc32c.value(prelude)
-
-    # Construct the message without the final message CRC
-    message_without_crc = (
-        prelude + struct.pack("!I", prelude_crc) + headers + payload_bytes
-    )
-
-    # Compute the message CRC over everything so far
-    message_crc = google_crc32c.value(message_without_crc)
-
-    # Final message
-    message = message_without_crc + struct.pack("!I", message_crc)
-    return message
-
-
-async def openai_stream_to_bedrock_chunks(stream) -> AsyncGenerator[bytes, None]:
-    """
-    Convert an OpenAI streaming response (ChatCompletion) into AWS Bedrock-compatible event stream messages.
-    """
-
+async def openai_stream_to_bedrock_chunks(openai_stream):
+    message_started = False
     content_block_index = 0
-    message_start_sent = False
 
-    async for chunk in stream:
-        # Each 'chunk' is expected to be an OpenAI partial response
-        if not chunk or not hasattr(chunk, "choices") or len(chunk.choices) == 0:
-            continue
+    async for chunk in openai_stream:
+        print(f"chunk: {chunk}")
+        # chunk looks like:
+        # {
+        #   "id": "...",
+        #   "object": "chat.completion.chunk",
+        #   "created": 1681234567,
+        #   "choices": [
+        #       {
+        #         "delta": {"role": "assistant"} or {"content": "partial text"},
+        #         "index":0,
+        #         "finish_reason": null or "stop"
+        #       }
+        #    ]
+        # }
+        delta = chunk.choices[0].delta
+        finish_reason = chunk.choices[0].finish_reason
 
-        choice = chunk.choices[0]
-        delta = choice.delta
-        finish_reason = choice.finish_reason
-        role = delta.role if hasattr(delta, "role") else None
-        text = delta.content if hasattr(delta, "content") else None
+        # When role=assistant appears, start message
+        if delta.role and not message_started:
+            # Just return the role payload
+            event_payload = json.dumps({"role": delta.role}).encode("utf-8")
+            yield create_event_message(event_payload, "messageStart")
+            message_started = True
 
-        # Handle finishing
-        if finish_reason is not None:
-            # Send a messageStop event
-            bedrock_stop = {
-                "messageStop": {
-                    "stopReason": map_finish_reason_to_bedrock(finish_reason)
-                },
-            }
-            yield encode_event_stream_message(bedrock_stop, "messageStop")
-            break
-
-        # If we get a role and haven't started a message yet, send messageStart
-        if role and not message_start_sent:
-            bedrock_message_start = {"messageStart": {"role": role}}
-            yield encode_event_stream_message(bedrock_message_start, "messageStart")
-            message_start_sent = True
-
-        # If we have text content, send a contentBlockDelta event
-        if text is not None:
-            if not message_start_sent:
-                # If no messageStart was sent, default to assistant
-                bedrock_message_start = {
-                    "messageStart": {"role": "assistant"},
-                }
-                yield encode_event_stream_message(bedrock_message_start, "messageStart")
-                message_start_sent = True
-
-            bedrock_chunk = {
-                "contentBlockDelta": {
+        if delta.content:
+            # Provide contentBlockDelta fields directly, not nested under "contentBlockDelta"
+            event_payload = json.dumps(
+                {
                     "contentBlockIndex": content_block_index,
-                    "delta": {"text": text},
-                },
-            }
-            yield encode_event_stream_message(bedrock_chunk, "contentBlockDelta")
+                    "delta": {"text": delta.content},
+                }
+            ).encode("utf-8")
+            yield create_event_message(event_payload, "contentBlockDelta")
+
+        if finish_reason == "stop":
+            # Just the stopReason field at top-level
+            event_payload = json.dumps({"stopReason": "end_turn"}).encode("utf-8")
+            yield create_event_message(event_payload, "messageStop")
+
+
+def convert_bedrock_to_openai_streaming(model_id: str, bedrock_body: dict):
+    # Convert Bedrock request structure to OpenAI request
+    # Example: Extract user messages from bedrock_body['messages'] and map to OpenAI.
+    # Bedrock: messages=[{"role": "user", "content": [{"text": "Hello"}]}]
+    # OpenAI: messages=[{"role":"user", "content":"Hello"}]
+    openai_messages = []
+    for msg in bedrock_body.get("messages", []):
+        role = msg.get("role", "user")
+        # Combine all content blocks into one text (if multiple)
+        text_parts = [c.get("text", "") for c in msg.get("content", [])]
+        text = " ".join(text_parts)
+        openai_messages.append({"role": role, "content": text})
+
+    openai_params = {
+        "model": model_id,  # or any model ID you have
+        "messages": openai_messages,
+        "stream": True,
+        # Add other parameters as needed (temperature, top_p, etc.)
+    }
+    return openai_params
 
 
 @app.post("/bedrock/model/{model_id}/converse-stream")
@@ -258,12 +253,13 @@ async def handle_bedrock_streaming_request(model_id: str, request: Request):
         if auth_header and auth_header.startswith("Bearer "):
             api_key = auth_header[len("Bearer ") :]
         else:
+            print(f"Missing or invalid Authorization header")
             return JSONResponse(
                 status_code=401,
                 content={"error": "Missing or invalid Authorization header"},
             )
 
-        openai_params = await convert_bedrock_to_openai_streaming(model_id, body)
+        openai_params = convert_bedrock_to_openai_streaming(model_id, body)
 
         # Create the OpenAI client with the provided API key
         client = AsyncOpenAI(api_key=api_key, base_url=LITELLM_ENDPOINT)
@@ -277,12 +273,13 @@ async def handle_bedrock_streaming_request(model_id: str, request: Request):
             media_type="application/vnd.amazon.eventstream",  # Changed media type
         )
     except Exception as e:
+        print(f"Exception: {e}")
         return JSONResponse(
             status_code=500, content={"error": f"Internal server error: {str(e)}"}
         )
 
     except Exception as e:
-        print(f"exception: {e}")
+        print(f"Exception: {e}")
         return JSONResponse(
             status_code=500, content={"error": f"Internal server error: {str(e)}"}
         )

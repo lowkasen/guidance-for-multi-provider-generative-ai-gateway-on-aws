@@ -86,7 +86,6 @@ def send_message_stream(
 
         # Process the streaming response
         for event in response["stream"]:
-            print(f"event: {event}")
             yield event
 
     except Exception as e:
@@ -118,10 +117,9 @@ def main():
 
         # Example of using streaming response
         print("Sending streaming request...")
-        message = "Write a short story about a robot learning to paint."
+        message = "Hi how are you."
 
         # Accumulate the response
-        full_response = ""
 
         # Process the streaming response
         for event in send_message_stream(client, message):
@@ -139,13 +137,6 @@ def main():
                 raise Exception(f"Validation error: {event['validationException']}")
             elif "throttlingException" in event:
                 raise Exception(f"Throttling error: {event['throttlingException']}")
-
-            # Process content
-            content = process_stream_response(event)
-            if content:
-                print(content, end="", flush=True)
-                full_response += content
-
             # Handle metadata and stop events
             if "messageStop" in event:
                 print("\n\nStream finished.")
