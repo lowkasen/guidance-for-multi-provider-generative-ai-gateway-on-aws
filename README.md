@@ -470,6 +470,18 @@ def create_bedrock_client():
 
 Once that client is initialized, you can use it exactly as you would use boto3 to call AWS Bedrock directly (currently only supports `converse` and `converse_stream`)
 
+The middleware layer also has support for Bedrock Prompt Management Prompts. It works the same as documented here: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/bedrock-runtime/client/converse.html#
+
+You can use a prompt like this:
+```
+model_id = "arn:aws:bedrock:us-west-2:235614385815:prompt/6LE1KDKISG" #Put the arn of your prompt as the model_id
+response = client.converse(
+    modelId=model_id,
+    promptVariables={ #specify any variables you need for your prompt
+        "topic": {"text": "fruit"},
+    })
+```
+
 ## Open Source Library
 
 For detailed information about the open source libraries used in this application, please refer to the [ATTRIBUTION](ATTRIBUTION.md) file.
