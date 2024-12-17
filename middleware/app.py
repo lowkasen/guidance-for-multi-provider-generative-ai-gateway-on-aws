@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 import httpx
 import json
@@ -7,12 +7,16 @@ from openai import AsyncOpenAI
 import struct
 import google_crc32c
 import zlib
+import boto3
+import re
 
 app = FastAPI()
 
 # Since we're in the same container, we can use localhost
 LITELLM_ENDPOINT = "http://localhost:4000"
 LITELLM_CHAT = f"{LITELLM_ENDPOINT}/v1/chat/completions"
+
+bedrock_client = boto3.client("bedrock-agent")
 
 
 class CustomEventStream:
@@ -86,16 +90,67 @@ def convert_messages_to_openai(
 
 
 async def convert_bedrock_to_openai(
-    model_id: str, bedrock_request: Dict[str, Any]
+    model_id: str, bedrock_request: Dict[str, Any], streaming: bool
 ) -> Dict[str, Any]:
+
+    prompt_variables = bedrock_request.get("promptVariables", {})
+    final_prompt_text = None
+    print(f"initial_model_id: {model_id}")
+    if model_id.startswith("arn:aws:bedrock:"):
+        print(f"entered first if with model_id: {model_id}")
+        prompt_id, prompt_version = parse_prompt_arn(model_id)
+        print(f"prompt_id: {prompt_id} prompt_version: {prompt_version}")
+        if prompt_id:
+            print(f"prompt_id: {prompt_id}")
+            # Retrieve the prompt
+            if prompt_version:
+                print(f"prompt_version: {prompt_version}")
+                prompt = bedrock_client.get_prompt(
+                    promptIdentifier=prompt_id, promptVersion=prompt_version
+                )
+            else:
+                prompt = bedrock_client.get_prompt(promptIdentifier=prompt_id)
+
+            print(f"prompt: {prompt}")
+            variants = prompt.get("variants", [])
+            print(f"variants: {variants}")
+            variant = variants[0]
+            print(f"variant: {variant}")
+            template_text = variant["templateConfiguration"]["text"]["text"]
+            print(f"template_text: {template_text}")
+            print(f"prompt_variables: {prompt_variables}")
+            # Construct the prompt by replacing variables
+
+            validate_prompt_variables(template_text, prompt_variables)
+
+            final_prompt_text = construct_prompt_text_from_variables(
+                template_text, prompt_variables
+            )
+            print(f"final_prompt_text: {final_prompt_text}")
+            model_id = variant["modelId"]
+            print(f"prompt model_id: {model_id}")
+
     """Convert Bedrock Converse API format to OpenAI format."""
     completion_params = {"model": model_id}
+    print(f"completion_params: {completion_params}")
+
+    print(f'bedrock_request.get("messages", []): {bedrock_request.get("messages", [])}')
 
     # Convert messages
-    messages = convert_messages_to_openai(
-        bedrock_request.get("messages", []), bedrock_request.get("system", [])
-    )
+    if final_prompt_text:
+        final_prompt_messages = [
+            {"role": "user", "content": [{"text": final_prompt_text}]}
+        ]
+        print(f"final_prompt_messages: {final_prompt_messages}")
+        messages = convert_messages_to_openai(final_prompt_messages, [])
+    else:
+        messages = convert_messages_to_openai(
+            bedrock_request.get("messages", []), bedrock_request.get("system", [])
+        )
+
     completion_params["messages"] = messages
+    if streaming:
+        completion_params["stream"] = True
 
     # Map inference configuration
     if "inferenceConfig" in bedrock_request:
@@ -110,35 +165,6 @@ async def convert_bedrock_to_openai(
             completion_params["top_p"] = config["topP"]
 
     # Add any additional model fields
-    if "additionalModelRequestFields" in bedrock_request:
-        completion_params.update(bedrock_request["additionalModelRequestFields"])
-
-    return completion_params
-
-
-async def convert_bedrock_to_openai_streaming(
-    model_id: str, bedrock_request: Dict[str, Any]
-) -> Dict[str, Any]:
-    completion_params = {
-        "model": model_id,
-        "stream": True,
-    }
-    messages = convert_messages_to_openai(
-        bedrock_request.get("messages", []), bedrock_request.get("system", [])
-    )
-    completion_params["messages"] = messages
-
-    if "inferenceConfig" in bedrock_request:
-        config = bedrock_request["inferenceConfig"]
-        if "temperature" in config:
-            completion_params["temperature"] = config["temperature"]
-        if "maxTokens" in config:
-            completion_params["max_tokens"] = config["maxTokens"]
-        if "stopSequences" in config:
-            completion_params["stop"] = config["stopSequences"]
-        if "topP" in config:
-            completion_params["top_p"] = config["topP"]
-
     if "additionalModelRequestFields" in bedrock_request:
         completion_params.update(bedrock_request["additionalModelRequestFields"])
 
@@ -222,26 +248,17 @@ async def openai_stream_to_bedrock_chunks(openai_stream):
             yield create_event_message(event_payload, "messageStop")
 
 
-def convert_bedrock_to_openai_streaming(model_id: str, bedrock_body: dict):
-    # Convert Bedrock request structure to OpenAI request
-    # Example: Extract user messages from bedrock_body['messages'] and map to OpenAI.
-    # Bedrock: messages=[{"role": "user", "content": [{"text": "Hello"}]}]
-    # OpenAI: messages=[{"role":"user", "content":"Hello"}]
-    openai_messages = []
-    for msg in bedrock_body.get("messages", []):
-        role = msg.get("role", "user")
-        # Combine all content blocks into one text (if multiple)
-        text_parts = [c.get("text", "") for c in msg.get("content", [])]
-        text = " ".join(text_parts)
-        openai_messages.append({"role": role, "content": text})
-
-    openai_params = {
-        "model": model_id,  # or any model ID you have
-        "messages": openai_messages,
-        "stream": True,
-        # Add other parameters as needed (temperature, top_p, etc.)
-    }
-    return openai_params
+# For some reason, fastapi takes escaped forward slashes (%2F) as being regular forward slashes, so needed to add a new route
+@app.post("/bedrock/model/{prompt_arn_prefix}/{prompt_id}/converse-stream")
+async def handle_bedrock_streaming_request_prompts(
+    prompt_arn_prefix: str, prompt_id: str, request: Request
+):
+    print(f"prompt_arn_prefix: {prompt_arn_prefix}")
+    print(f"prompt_id: {prompt_id}")
+    full_arn = prompt_arn_prefix + "/" + prompt_id
+    print(f"full_arn: {full_arn}")
+    result = await handle_bedrock_streaming_request(full_arn, request)
+    return result
 
 
 @app.post("/bedrock/model/{model_id}/converse-stream")
@@ -259,7 +276,7 @@ async def handle_bedrock_streaming_request(model_id: str, request: Request):
                 content={"error": "Missing or invalid Authorization header"},
             )
 
-        openai_params = convert_bedrock_to_openai_streaming(model_id, body)
+        openai_params = await convert_bedrock_to_openai(model_id, body, True)
 
         # Create the OpenAI client with the provided API key
         client = AsyncOpenAI(api_key=api_key, base_url=LITELLM_ENDPOINT)
@@ -272,17 +289,15 @@ async def handle_bedrock_streaming_request(model_id: str, request: Request):
             openai_stream_to_bedrock_chunks(stream),
             media_type="application/vnd.amazon.eventstream",  # Changed media type
         )
+    except HTTPException as he:
+        print(f"HTTPException: {he} detail: {he.detail}")
+        return JSONResponse(
+            status_code=400,
+            content=he.detail,
+        )
     except Exception as e:
         print(f"Exception: {e}")
-        return JSONResponse(
-            status_code=500, content={"error": f"Internal server error: {str(e)}"}
-        )
-
-    except Exception as e:
-        print(f"Exception: {e}")
-        return JSONResponse(
-            status_code=500, content={"error": f"Internal server error: {str(e)}"}
-        )
+        return JSONResponse(status_code=500, content=f"Internal server error: {str(e)}")
 
 
 @app.get("/bedrock/health/liveliness")
@@ -311,6 +326,69 @@ async def health_check():
         )
 
 
+def parse_prompt_arn(arn: str):
+    # Example ARN formats:
+    # Without version: arn:aws:bedrock:us-west-2:235614385815:prompt/6LE1KDKISG
+    # With version: arn:aws:bedrock:us-west-2:235614385815:prompt/6LE1KDKISG:2
+    print(f"arn: {arn}")
+
+    # First, split on "prompt/" to isolate the prompt identifier and optional version
+    if "prompt/" not in arn:
+        print(f"returning none for parse_prompt_arn because prompt is not in {arn}")
+        return None, None
+
+    # after_prompt might look like "6LE1KDKISG" or "6LE1KDKISG:2"
+    after_prompt = arn.split("prompt/", 1)[1]
+    print(f"after_prompt: {after_prompt}")
+
+    # Now split after_prompt on ":" to see if we have a version
+    if ":" in after_prompt:
+        prompt_id, prompt_version = after_prompt.split(":", 1)
+        print(f"prompt_id: {prompt_id} prompt_version: {prompt_version}")
+        return prompt_id, prompt_version
+    else:
+        print(f"after_prompt: {after_prompt}")
+        return after_prompt, None
+
+
+def validate_prompt_variables(template_text: str, variables: Dict[str, Any]):
+    # Find all placeholders of the form {{variableName}}
+    found_placeholders = re.findall(r"{{\s*(\w+)\s*}}", template_text)
+    placeholders_set = set(found_placeholders)
+    variables_set = set(variables.keys())
+
+    # Check if sets match exactly
+    if placeholders_set != variables_set:
+        # Sets differ, raise a 400 error
+        detail_message = {
+            "message": f"Prompt variable mismatch. Template placeholders: {placeholders_set}. Provided variables: {variables_set}."
+        }
+        raise HTTPException(status_code=400, detail=detail_message)
+
+
+def construct_prompt_text_from_variables(template_text: str, variables: dict) -> str:
+    # variables is something like {"topic": {"text": "stuff"}}
+    # template_text is something like: "This is my first text prompt. Please summarize on {{topic}}."
+    # Replace {{topic}} with "stuff"
+    for var_name, var_value in variables.items():
+        value = var_value.get("text", "")
+        template_text = template_text.replace(f"{{{{{var_name}}}}}", value)
+    return template_text
+
+
+# For some reason, fastapi takes escaped forward slashes (%2F) as being regular forward slashes, so needed to add a new route
+@app.post("/bedrock/model/{prompt_arn_prefix}/{prompt_id}/converse")
+async def handle_bedrock_request_prompts(
+    prompt_arn_prefix: str, prompt_id: str, request: Request
+):
+    print(f"prompt_arn_prefix: {prompt_arn_prefix}")
+    print(f"prompt_id: {prompt_id}")
+    full_arn = prompt_arn_prefix + "/" + prompt_id
+    print(f"full_arn: {full_arn}")
+    result = await handle_bedrock_request(full_arn, request)
+    return result
+
+
 @app.post("/bedrock/model/{model_id}/converse")
 async def handle_bedrock_request(model_id: str, request: Request):
     """Handle Bedrock Converse API requests."""
@@ -318,7 +396,7 @@ async def handle_bedrock_request(model_id: str, request: Request):
     try:
         body = await request.json()
 
-        openai_format = await convert_bedrock_to_openai(model_id, body)
+        openai_format = await convert_bedrock_to_openai(model_id, body, False)
 
         auth_header = request.headers.get("Authorization")
         headers = {"Content-Type": "application/json"}
@@ -345,11 +423,15 @@ async def handle_bedrock_request(model_id: str, request: Request):
             )
             return JSONResponse(content=bedrock_response)
 
+    except HTTPException as he:
+        print(f"HTTPException: {he} detail: {he.detail}")
+        return JSONResponse(
+            status_code=400,
+            content=he.detail,
+        )
     except Exception as e:
         print(f"converse api errror e: {e}")
-        return JSONResponse(
-            status_code=500, content={"error": f"Internal server error: {str(e)}"}
-        )
+        return JSONResponse(status_code=500, content=f"Internal server error: {str(e)}")
 
 
 if __name__ == "__main__":
