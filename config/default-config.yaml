@@ -28,6 +28,9 @@ model_list:
       # }
       # weight: 1 #Used to load balance between two different models. Give two different models the same "model_name" and the traffic will be distributed based on the relative weights
 
+  - model_name: anthropic.claude-3-5-sonnet-20241022-v2:0
+    litellm_params:
+      model: bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0
   - model_name: anthropic.claude-3-sonnet-20240229-v1:0
     litellm_params:
       model: bedrock/anthropic.claude-3-sonnet-20240229-v1:0

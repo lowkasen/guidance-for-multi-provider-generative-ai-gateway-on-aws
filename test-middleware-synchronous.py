@@ -2,6 +2,7 @@ import boto3
 import os
 from botocore.client import Config
 from botocore import UNSIGNED
+from botocore.exceptions import ClientError
 
 
 def create_bedrock_client():
@@ -86,8 +87,14 @@ def main():
 
         print("API Response:", response)
 
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        error_message = e.response["Error"]["Message"]
+        print(f"e.response: {e.response}")
+
+        print(f"AWS Error: {error_code} - {error_message}")
     except Exception as e:
-        print(f"Error in main: {str(e)}")
+        print(f"Unexpected error: {str(e)}")
 
 
 if __name__ == "__main__":
