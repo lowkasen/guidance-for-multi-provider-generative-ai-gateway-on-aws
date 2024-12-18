@@ -379,11 +379,24 @@ export class LitellmCdkStack extends cdk.Stack {
           listener: 'Listener',
           priority: 5,
           pathPattern: '/bedrock*',
-        },
+        }
       ],
       desiredCount: 1,
       healthCheckGracePeriod: cdk.Duration.seconds(300),
     });
+
+    const listener = fargateService.listeners[0]; // The previously created listener
+    const targetGroup = fargateService.targetGroups[1]; // The main target group created
+
+    // Add additional rules with multiple conditions, all pointing to the same targetGroup
+    listener.addAction('OpenAIPaths', {
+      priority: 6,
+      conditions: [
+        elasticloadbalancingv2.ListenerCondition.pathPatterns(['/v1/chat/completions', '/chat/completions']),
+      ],
+      action: elasticloadbalancingv2.ListenerAction.forward([targetGroup]),
+    });
+
 
     redisSecurityGroup.addIngressRule(
       fargateService.service.connections.securityGroups[0],

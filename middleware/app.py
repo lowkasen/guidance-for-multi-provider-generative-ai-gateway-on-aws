@@ -1,11 +1,10 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 import httpx
 import json
 from typing import Dict, Any, AsyncGenerator, List, Optional
 from openai import AsyncOpenAI
 import struct
-import google_crc32c
 import zlib
 import boto3
 import re
@@ -554,6 +553,65 @@ async def handle_bedrock_request(model_id: str, request: Request):
     except Exception as e:
         print(f"exception: {e}")
         return JSONResponse(status_code=500, content=f"Internal server error: {str(e)}")
+
+
+async def forward_openai_stream(stream) -> AsyncGenerator[bytes, None]:
+    """
+    Forward the streaming response from OpenAI client.
+    """
+    try:
+        async for chunk in stream:
+            # Convert the chunk to the same format as the API response
+            yield f"data: {json.dumps(chunk.model_dump())}\n\n".encode("utf-8")
+    except Exception as e:
+        print(f"Streaming error: {e}")
+        raise
+
+
+@app.post("/v1/chat/completions")
+@app.post("/chat/completions")
+async def proxy_request(request: Request):
+    # Read raw request data
+    body = await request.body()
+
+    try:
+        # Parse request data
+        data = json.loads(body)
+        is_streaming = data.get("stream", False)
+
+        # Get API key from headers
+        api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+
+        # Initialize OpenAI client
+        client = AsyncOpenAI(
+            api_key=api_key, base_url=LITELLM_ENDPOINT  # Your LITELLM_CHAT URL
+        )
+
+        if is_streaming:
+            # Handle streaming request
+            stream = await client.chat.completions.create(**data)
+            return StreamingResponse(
+                forward_openai_stream(stream), media_type="text/event-stream"
+            )
+        else:
+            # Handle non-streaming request
+            response = await client.chat.completions.create(**data)
+            return Response(
+                content=json.dumps(response.model_dump()), media_type="application/json"
+            )
+
+    except json.JSONDecodeError:
+        return Response(
+            content=json.dumps({"error": "Invalid JSON"}),
+            status_code=400,
+            media_type="application/json",
+        )
+    except Exception as e:
+        return Response(
+            content=json.dumps({"error": str(e)}),
+            status_code=500,
+            media_type="application/json",
+        )
 
 
 if __name__ == "__main__":
