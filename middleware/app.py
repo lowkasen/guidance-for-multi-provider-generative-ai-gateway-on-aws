@@ -582,13 +582,13 @@ async def proxy_request(request: Request):
         # Get API key from headers
         api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
 
-        # Check if model is actually a prompt ARN
         print(f"data: {data}")
         model_id = data.get("model")
         prompt_variables = data.pop("promptVariables", {})
         print(f"data: {data}")
 
         final_prompt_text = None
+        # Check if model is actually a prompt ARN
         if model_id and model_id.startswith("arn:aws:bedrock:"):
             prompt_id, prompt_version = parse_prompt_arn(model_id)
             if prompt_id:
