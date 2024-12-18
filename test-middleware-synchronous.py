@@ -67,7 +67,7 @@ def send_message(
                 # promptVariables={
                 #     "topic": {"text": "fruit"},
                 # },
-                additionalModelRequestFields={"session-id": session_id},
+                additionalModelRequestFields={"session_id": session_id},
                 messages=[{"role": "user", "content": [{"text": message}]}],
             )
         else:

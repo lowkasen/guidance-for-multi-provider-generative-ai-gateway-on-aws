@@ -209,11 +209,11 @@ async def convert_bedrock_to_openai(
             completion_params["top_p"] = config["topP"]
 
     if "additionalModelRequestFields" in bedrock_request:
-        # Exclude "session-id" from being added to completion_params
+        # Exclude "session_id" from being added to completion_params
         additional_fields = {
             key: value
             for key, value in bedrock_request["additionalModelRequestFields"].items()
-            if key != "session-id"
+            if key != "session_id"
         }
         completion_params.update(additional_fields)
 
@@ -331,7 +331,7 @@ async def process_chat_request(
     model_id: str, request: Request
 ) -> (Dict[str, Any], str):
     body = await request.json()
-    session_id = body.get("additionalModelRequestFields", {}).get("session-id", None)
+    session_id = body.get("additionalModelRequestFields", {}).get("session_id", None)
     print(f"session_id: {session_id}")
     if session_id is not None:
         chat_history = get_chat_history(session_id)
@@ -409,7 +409,7 @@ async def process_streaming_chat_request(
 ) -> (AsyncGenerator, str, List[Dict[str, str]], List[str]):
     body = await request.json()
 
-    session_id = body.get("additionalModelRequestFields", {}).get("session-id", None)
+    session_id = body.get("additionalModelRequestFields", {}).get("session_id", None)
     print(f"session_id: {session_id}")
     if session_id is not None:
         chat_history = get_chat_history(session_id)
@@ -579,16 +579,44 @@ async def proxy_request(request: Request):
         data = json.loads(body)
         is_streaming = data.get("stream", False)
 
+        # Extract session_id if provided
+        session_id = data.pop("session_id", None)
+
+        if session_id is not None:
+            chat_history = get_chat_history(session_id)
+            if chat_history is None:
+                chat_history = []
+                create_chat_history(session_id, chat_history)
+        else:
+            # No session_id provided, create one
+            session_id = str(uuid.uuid4())
+            chat_history = []
+            create_chat_history(session_id, chat_history)
+
+        # Merge incoming user messages into chat history
+        # data["messages"] are in OpenAI format: [{"role": "user"|"assistant"|"system", "content": "..."}]
+        user_messages_this_round = [
+            m for m in data.get("messages", []) if m["role"] == "user"
+        ]
+        if user_messages_this_round:
+            # Append only the last user message to the chat history
+            chat_history.append(user_messages_this_round[-1])
+
+        # Replace data["messages"] with the full chat_history
+        data["messages"] = chat_history
+
         # Get API key from headers
         api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+        if not api_key:
+            raise HTTPException(
+                status_code=401,
+                detail={"error": "Missing or invalid Authorization header"},
+            )
 
-        print(f"data: {data}")
+        # Check if model is a prompt ARN and handle prompt logic as before
         model_id = data.get("model")
         prompt_variables = data.pop("promptVariables", {})
-        print(f"data: {data}")
-
         final_prompt_text = None
-        # Check if model is actually a prompt ARN
         if model_id and model_id.startswith("arn:aws:bedrock:"):
             prompt_id, prompt_version = parse_prompt_arn(model_id)
             if prompt_id:
@@ -614,9 +642,8 @@ async def proxy_request(request: Request):
                 if "modelId" in variant:
                     data["model"] = variant["modelId"]
 
-        # If we got a final_prompt_text, replace data["messages"] entirely
+        # If we got a final_prompt_text, replace data["messages"] entirely with a single user message
         if final_prompt_text:
-            # Completely overwrite the messages list with a single user message
             data["messages"] = [{"role": "user", "content": final_prompt_text}]
 
         # Initialize OpenAI client
@@ -625,14 +652,69 @@ async def proxy_request(request: Request):
         if is_streaming:
             # Handle streaming request
             stream = await client.chat.completions.create(**data)
-            return StreamingResponse(
-                forward_openai_stream(stream), media_type="text/event-stream"
+
+            assistant_content_parts = []
+
+            async def stream_wrapper():
+                first_chunk = True
+                async for chunk in stream:
+                    chunk_dict = chunk.model_dump()
+                    print(f"chunk_dict before: {chunk_dict}")
+                    if first_chunk:
+                        chunk_dict["session_id"] = session_id
+                        first_chunk = False
+                    # Write out the chunk immediately
+                    yield f"data: {json.dumps(chunk_dict)}\n\n".encode("utf-8")
+
+                    # Extract assistant delta content if available
+                    choice = chunk_dict["choices"][0]
+                    delta = choice.get("delta", {})
+                    finish_reason = choice.get("finish_reason")
+                    print(f"chunk_dict after: {chunk_dict}")
+                    if "content" in delta and delta["content"]:
+                        assistant_content_parts.append(delta["content"])
+
+                    if finish_reason == "stop":
+                        # Once we hit stop, we can finalize the assistant message
+                        break
+
+            async def finalizing_stream():
+                # Stream the response back to the client
+                async for event in stream_wrapper():
+                    yield event
+
+                # After streaming is done, append the assistant message to chat history
+                if assistant_content_parts:
+                    print(f"assistant_content_parts: {assistant_content_parts}")
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": "".join(assistant_content_parts),
+                    }
+                    chat_history.append(assistant_message)
+                    update_chat_history(session_id, chat_history)
+
+            response = StreamingResponse(
+                finalizing_stream(), media_type="text/event-stream"
             )
+            return response
+
         else:
             # Handle non-streaming request
             response = await client.chat.completions.create(**data)
+            response_dict = response.model_dump()
+
+            # Append assistant's response to chat history
+            if response_dict.get("choices"):
+                assistant_message = response_dict["choices"][0]["message"]
+                chat_history.append(
+                    {"role": "assistant", "content": assistant_message["content"]}
+                )
+                update_chat_history(session_id, chat_history)
+
+            response_dict["session_id"] = session_id
             return Response(
-                content=json.dumps(response.model_dump()), media_type="application/json"
+                content=json.dumps(response_dict),
+                media_type="application/json",
             )
 
     except json.JSONDecodeError:
