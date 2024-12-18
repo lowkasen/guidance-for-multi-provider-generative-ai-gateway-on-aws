@@ -582,10 +582,45 @@ async def proxy_request(request: Request):
         # Get API key from headers
         api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
 
+        # Check if model is actually a prompt ARN
+        print(f"data: {data}")
+        model_id = data.get("model")
+        prompt_variables = data.pop("promptVariables", {})
+        print(f"data: {data}")
+
+        final_prompt_text = None
+        if model_id and model_id.startswith("arn:aws:bedrock:"):
+            prompt_id, prompt_version = parse_prompt_arn(model_id)
+            if prompt_id:
+                # Fetch the prompt
+                if prompt_version:
+                    prompt = bedrock_client.get_prompt(
+                        promptIdentifier=prompt_id, promptVersion=prompt_version
+                    )
+                else:
+                    prompt = bedrock_client.get_prompt(promptIdentifier=prompt_id)
+
+                variants = prompt.get("variants", [])
+                variant = variants[0]
+                template_text = variant["templateConfiguration"]["text"]["text"]
+
+                # Validate and construct the final prompt text
+                validate_prompt_variables(template_text, prompt_variables)
+                final_prompt_text = construct_prompt_text_from_variables(
+                    template_text, prompt_variables
+                )
+
+                # If we have a model inside the variant, use that
+                if "modelId" in variant:
+                    data["model"] = variant["modelId"]
+
+        # If we got a final_prompt_text, replace data["messages"] entirely
+        if final_prompt_text:
+            # Completely overwrite the messages list with a single user message
+            data["messages"] = [{"role": "user", "content": final_prompt_text}]
+
         # Initialize OpenAI client
-        client = AsyncOpenAI(
-            api_key=api_key, base_url=LITELLM_ENDPOINT  # Your LITELLM_CHAT URL
-        )
+        client = AsyncOpenAI(api_key=api_key, base_url=LITELLM_ENDPOINT)
 
         if is_streaming:
             # Handle streaming request
@@ -606,7 +641,10 @@ async def proxy_request(request: Request):
             status_code=400,
             media_type="application/json",
         )
+    except HTTPException as he:
+        return JSONResponse(status_code=he.status_code, content=he.detail)
     except Exception as e:
+        print(f"Exception in proxy_request: {e}")
         return Response(
             content=json.dumps({"error": str(e)}),
             status_code=500,

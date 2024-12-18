@@ -472,7 +472,7 @@ Once that client is initialized, you can use it exactly as you would use boto3 t
 
 The middleware layer also has support for Bedrock Prompt Management Prompts. It works the same as documented here: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/bedrock-runtime/client/converse.html#
 
-You can use a prompt like this:
+You can use a managed prompt like this:
 ```
 model_id = "arn:aws:bedrock:us-west-2:235614385815:prompt/6LE1KDKISG" #Put the arn of your prompt as the model_id
 response = client.converse(
@@ -482,6 +482,21 @@ response = client.converse(
     })
 ```
 
+The OpenAI Interface also has support for Bedrock Manage Prompts.
+
+You can use a managed prompt like this:
+
+```
+model = "arn:aws:bedrock:us-west-2:235614385815:prompt/6LE1KDKISG:2" #Put the arn of your prompt as the model_id
+
+response = client.chat.completions.create(
+    model=model,
+    messages=[], #Messages is required to be passed in, but it will not be used. Your managed prompt will be used instead
+    stream=False,
+    extra_body={"promptVariables": {"topic": {"text": "fruit"}}},
+)
+return response.choices[0].message.content
+```
 ## Open Source Library
 
 For detailed information about the open source libraries used in this application, please refer to the [ATTRIBUTION](ATTRIBUTION.md) file.
