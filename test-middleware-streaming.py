@@ -2,7 +2,10 @@ import boto3
 import os
 from botocore.client import Config
 from botocore import UNSIGNED
-from typing import Generator, Dict, Any
+from typing import Generator, Dict, Any, Optional
+
+
+global_session_id: Optional[str] = None
 
 
 def create_bedrock_client():
@@ -52,10 +55,32 @@ def create_bedrock_client():
     return client
 
 
+def extract_session_id(response) -> Optional[str]:
+    """
+    Extracts the x-session-id from the response headers.
+
+    Args:
+        response: The raw response object from the Bedrock API
+
+    Returns:
+        str: The session ID if found, None otherwise
+    """
+    try:
+        # Access the response metadata which contains the headers
+        headers = response["ResponseMetadata"]["HTTPHeaders"]
+        print(f"headers: {headers}")
+        session_id = headers.get("x-session-id")
+        print(f"session_id: {session_id}")
+        return session_id
+    except (KeyError, AttributeError):
+        print("Warning: Could not extract x-session-id from response headers")
+        return None
+
+
 def send_message_stream(
     client,
     message: str,
-    model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0",
+    model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0",
     max_tokens: int = 1000,
     temperature: float = 0.7,
 ) -> Generator[Dict[str, Any], None, None]:
@@ -72,15 +97,32 @@ def send_message_stream(
     Yields:
         dict: Streaming response events
     """
+
+    global global_session_id
+
     try:
-        response = client.converse_stream(
-            modelId=model_id,
-            messages=[{"role": "user", "content": [{"text": message}]}],
-            inferenceConfig={
-                "maxTokens": max_tokens,
-                "temperature": temperature,
-            },
-        )
+        if global_session_id:
+            response = client.converse_stream(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": message}]}],
+                inferenceConfig={
+                    "maxTokens": max_tokens,
+                    "temperature": temperature,
+                },
+                additionalModelRequestFields={"session-id": global_session_id},
+            )
+        else:
+            response = client.converse_stream(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": message}]}],
+                inferenceConfig={
+                    "maxTokens": max_tokens,
+                    "temperature": temperature,
+                },
+            )
+        global_session_id = extract_session_id(response)
+        if global_session_id:
+            print(f"global_session_id: {global_session_id}")
         print(f"response: {response}")
         print(f"response['stream']: {response["stream"]}")
 
@@ -110,14 +152,8 @@ def process_stream_response(event: Dict[str, Any]) -> str:
     return ""
 
 
-def main():
+def send_message_stream_wrapper(client, message):
     try:
-        # Create the client
-        client = create_bedrock_client()
-
-        # Example of using streaming response
-        print("Sending streaming request...")
-        message = "Hi how are you."
 
         # Accumulate the response
 
@@ -148,6 +184,18 @@ def main():
 
     except Exception as e:
         print(f"Error in main: {str(e)}")
+
+
+def main():
+    # Create the client
+    client = create_bedrock_client()
+
+    # Example of using streaming response
+    print("Sending streaming request...")
+    message = "Hi how are you."
+    send_message_stream_wrapper(client=client, message=message)
+    message2 = "What did I last say to you?"
+    send_message_stream_wrapper(client=client, message=message2)
 
 
 if __name__ == "__main__":
