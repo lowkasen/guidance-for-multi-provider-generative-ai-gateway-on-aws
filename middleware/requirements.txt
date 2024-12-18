@@ -6,3 +6,5 @@ openai
 botocore
 google-crc32c
 boto3
+sqlalchemy
+psycopg2-binary

@@ -6,19 +6,6 @@ from botocore.exceptions import ClientError
 
 
 def create_bedrock_client():
-    """
-    Creates a Bedrock client with custom endpoint and authorization header.
-    Uses environment variables for configuration.
-
-    Required environment variables:
-    - API_ENDPOINT: Custom Bedrock endpoint URL
-    - API_KEY: Authorization bearer token
-    - AWS_REGION: AWS region
-
-    Returns:
-        boto3.client: Configured Bedrock client
-    """
-
     # Get configuration from environment variables
     endpoint = os.getenv("API_ENDPOINT")
     api_key = os.getenv("API_KEY")
@@ -33,7 +20,6 @@ def create_bedrock_client():
     session = boto3.Session()
     client_config = Config(
         signature_version=UNSIGNED,  # Disable SigV4 signing
-        retries={"max_attempts": 10, "mode": "standard"},
     )
 
     # Create the Bedrock client
@@ -54,7 +40,12 @@ def create_bedrock_client():
     return client
 
 
-def send_message(client, message, model_id="anthropic.claude-3-sonnet-20240229-v1:0"):
+def send_message(
+    client,
+    message,
+    model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    session_id=None,
+):
     """
     Sends a message to the Bedrock Converse API.
 
@@ -66,11 +57,28 @@ def send_message(client, message, model_id="anthropic.claude-3-sonnet-20240229-v
     Returns:
         dict: API response
     """
+
+    # model_id = "arn:aws:bedrock:us-west-2:235614385815:prompt/6LE1KDKISG:2"
+    body = {}
     try:
-        response = client.converse(
-            modelId=model_id,
-            messages=[{"role": "user", "content": [{"text": message}]}],
-        )
+        if session_id:
+            response = client.converse(
+                modelId=model_id,
+                # promptVariables={
+                #     "topic": {"text": "fruit"},
+                # },
+                additionalModelRequestFields={"session-id": session_id},
+                messages=[{"role": "user", "content": [{"text": message}]}],
+            )
+        else:
+            response = client.converse(
+                modelId=model_id,
+                # promptVariables={
+                #     "topic": {"text": "fruit"},
+                # },
+                messages=[{"role": "user", "content": [{"text": message}]}],
+            )
+
         return response
     except Exception as e:
         print(f"Error sending message: {str(e)}")
@@ -85,7 +93,13 @@ def main():
         # Send a test message
         response = send_message(client=client, message="Hello, how are you?")
 
-        print("API Response:", response)
+        print("Response:", response)
+        session_id = response["ResponseMetadata"]["HTTPHeaders"].get("x-session-id")
+        print(f"session_id: {session_id}")
+        response_2 = send_message(
+            client=client, message="What did I last say to you?", session_id=session_id
+        )
+        print("Response 2:", response_2)
 
     except ClientError as e:
         error_code = e.response["Error"]["Code"]

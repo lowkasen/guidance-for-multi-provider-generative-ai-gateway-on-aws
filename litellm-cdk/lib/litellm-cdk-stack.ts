@@ -87,6 +87,16 @@ export class LitellmCdkStack extends cdk.Stack {
       },
     });
 
+    const databaseMiddlewareSecret = new secretsmanager.Secret(this, 'DBMiddlewareSecret', {
+      generateSecretString: {
+        secretStringTemplate: JSON.stringify({
+          username: 'middleware',
+        }),
+        generateStringKey: 'password',
+        excludePunctuation: true,
+      },
+    });
+
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'DBSecurityGroup', {
       vpc,
       description: 'Security group for RDS instance',
@@ -105,6 +115,20 @@ export class LitellmCdkStack extends cdk.Stack {
       securityGroups: [dbSecurityGroup],
       credentials: rds.Credentials.fromSecret(databaseSecret),
       databaseName: 'litellm',
+    });
+
+    const databaseMiddleware = new rds.DatabaseInstance(this, 'DatabaseMiddleware', {
+      engine: rds.DatabaseInstanceEngine.postgres({
+        version: rds.PostgresEngineVersion.VER_15,
+      }),
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
+      vpc,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      securityGroups: [dbSecurityGroup],
+      credentials: rds.Credentials.fromSecret(databaseMiddlewareSecret),
+      databaseName: 'middleware',
     });
 
     const redisSecurityGroup = new ec2.SecurityGroup(this, 'RedisSecurityGroup', {
@@ -248,6 +272,12 @@ export class LitellmCdkStack extends cdk.Stack {
       ),
     });
 
+    const dbMiddlewareUrlSecret = new secretsmanager.Secret(this, 'DBMiddlewareUrlSecret', {
+      secretStringValue: cdk.SecretValue.unsafePlainText(
+        `postgresql://middleware:${databaseMiddlewareSecret.secretValueFromJson('password').unsafeUnwrap()}@${databaseMiddleware.instanceEndpoint.hostname}:5432/middleware`
+      ),
+    });
+
     const ecrLitellmRepository = ecr.Repository.fromRepositoryName(
       this,
       props.ecrLitellmRepository!,
@@ -301,6 +331,9 @@ export class LitellmCdkStack extends cdk.Stack {
     const middlewareContainer = taskDefinition.addContainer('MiddlewareContainer', {
       image: ecs.ContainerImage.fromEcrRepository(ecrMiddlewareRepository, "latest"),
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'Middleware' }),
+      secrets: {
+        DATABASE_MIDDLEWARE_URL: ecs.Secret.fromSecretsManager(dbMiddlewareUrlSecret),
+      }
     });  
 
     const domainParts = props.domainName.split(".");
