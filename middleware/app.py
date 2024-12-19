@@ -10,9 +10,19 @@ import boto3
 import re
 import os
 import uuid
-from sqlalchemy import create_engine, MetaData, Table, Column, String, Text, inspect
+from sqlalchemy import (
+    create_engine,
+    MetaData,
+    Table,
+    Column,
+    String,
+    Text,
+    inspect,
+    text,
+)
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import select, insert, update
+import hashlib
 
 app = FastAPI()
 
@@ -42,13 +52,29 @@ def setup_database():
                 metadata_obj,
                 Column("session_id", String, primary_key=True),
                 Column("chat_history", Text),
+                Column("api_key_hash", String),  # new column to store hashed API key
             )
             metadata_obj.create_all(engine)
             print("Created chat_sessions table")
         else:
+            # If the table exists, ensure it has the api_key_hash column
             chat_sessions_table = Table(
                 "chat_sessions", metadata_obj, autoload_with=engine
             )
+            columns = [c.name for c in chat_sessions_table.columns]
+            if "api_key_hash" not in columns:
+                with engine.connect() as conn:
+                    # Use text() to create an executable SQL expression
+                    conn.execute(
+                        text(
+                            "ALTER TABLE chat_sessions ADD COLUMN api_key_hash VARCHAR;"
+                        )
+                    )
+                    conn.commit()
+                # Reload table definition
+                chat_sessions_table = Table(
+                    "chat_sessions", metadata_obj, autoload_with=engine
+                )
             print("chat_sessions table already exists")
 
         return engine, chat_sessions_table
@@ -63,21 +89,32 @@ async def startup_event():
     db_engine, chat_sessions = setup_database()
 
 
-def get_chat_history(session_id: str) -> Optional[List[Dict[str, str]]]:
+def hash_api_key(api_key: str) -> str:
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def get_session_data(session_id: str) -> Optional[Dict[str, Any]]:
     with db_engine.connect() as conn:
-        stmt = select(chat_sessions.c.chat_history).where(
+        stmt = select(chat_sessions.c.chat_history, chat_sessions.c.api_key_hash).where(
             chat_sessions.c.session_id == session_id
         )
         result = conn.execute(stmt).fetchone()
-        if result and result[0]:
-            return json.loads(result[0])
+        if result:
+            return {
+                "chat_history": json.loads(result[0]) if result[0] else None,
+                "api_key_hash": result[1],
+            }
     return None
 
 
-def create_chat_history(session_id: str, chat_history: List[Dict[str, str]]):
+def create_chat_history(
+    session_id: str, chat_history: List[Dict[str, str]], api_key_hash: str
+):
     with db_engine.connect() as conn:
         stmt = insert(chat_sessions).values(
-            session_id=session_id, chat_history=json.dumps(chat_history)
+            session_id=session_id,
+            chat_history=json.dumps(chat_history),
+            api_key_hash=api_key_hash,
         )
         conn.execute(stmt)
         conn.commit()
@@ -333,16 +370,46 @@ async def process_chat_request(
     body = await request.json()
     session_id = body.get("additionalModelRequestFields", {}).get("session_id", None)
     print(f"session_id: {session_id}")
-    if session_id is not None:
-        chat_history = get_chat_history(session_id)
-        print(f"chat_history: {chat_history}")
-        if chat_history is None:
-            chat_history = []
-            create_chat_history(session_id, chat_history)
+    auth_header = request.headers.get("Authorization")
+    print(f"auth_header: {auth_header}")
+    if auth_header and auth_header.startswith("Bearer "):
+        api_key = auth_header[len("Bearer ") :]
     else:
+        print(f"Missing or invalid Authorization header: {auth_header}")
+        raise HTTPException(
+            status_code=401, detail={"error": "Missing or invalid Authorization header"}
+        )
+
+    provided_hash = hash_api_key(api_key)
+    print(f"provided_hash: {provided_hash}")
+
+    if session_id is not None:
+        session_data = get_session_data(session_id)
+        print(f"session_data: {session_data}")
+        if session_data is not None:
+            # Verify API key hash matches
+            if session_data["api_key_hash"] != provided_hash:
+                print(
+                    f"Unauthorized: API key does not match session owner: {session_data['api_key_hash']} provided_hash: {provided_hash}"
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail="Unauthorized: API key does not match session owner",
+                )
+            chat_history = (
+                session_data["chat_history"] if session_data["chat_history"] else []
+            )
+            print(f"chat_history: {chat_history}")
+
+        else:
+            print(f"creating chat history and session_id is not None")
+            chat_history = []
+            create_chat_history(session_id, chat_history, provided_hash)
+    else:
+        print(f"creating chat history and session_id is None")
         session_id = str(uuid.uuid4())
         chat_history = []
-        create_chat_history(session_id, chat_history)
+        create_chat_history(session_id, chat_history, provided_hash)
 
     openai_format = await convert_bedrock_to_openai(model_id, body, False)
     print(f"openai_format: {openai_format}")
@@ -354,21 +421,8 @@ async def process_chat_request(
     if user_messages_this_round:
         chat_history.append(user_messages_this_round[-1])
 
-    print(f"chat_history: {chat_history}")
-
-    # If we have a session (existing or new), we want to pass the full history to the LLM
-    # Replace openai_format["messages"] with the full chat_history (which now includes the latest user message)
+    # Replace openai_format["messages"] with the full chat_history
     openai_format["messages"] = chat_history
-
-    print(f"openai_format: {openai_format}")
-
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        api_key = auth_header[len("Bearer ") :]
-    else:
-        raise HTTPException(
-            status_code=401, detail={"error": "Missing or invalid Authorization header"}
-        )
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -380,7 +434,6 @@ async def process_chat_request(
             },
             timeout=30.0,
         )
-        print(f"response: {response}")
 
         if response.status_code != 200:
             raise HTTPException(
@@ -389,16 +442,12 @@ async def process_chat_request(
             )
 
         openai_response = response.json()
-        print(f"openai_response: {openai_response}")
         bedrock_response = await convert_openai_to_bedrock(openai_response)
-        print(f"bedrock_response: {bedrock_response}")
 
     # Append assistant's response to history
     assistant_message = openai_response["choices"][0]["message"]
-    print(f"assistant_message: {assistant_message}")
     chat_history.append({"role": "assistant", "content": assistant_message["content"]})
     update_chat_history(session_id, chat_history)
-    print(f"chat_history: {chat_history}")
 
     bedrock_response["session_id"] = session_id
     return bedrock_response, session_id
@@ -408,36 +457,6 @@ async def process_streaming_chat_request(
     model_id: str, request: Request
 ) -> (AsyncGenerator, str, List[Dict[str, str]], List[str]):
     body = await request.json()
-
-    session_id = body.get("additionalModelRequestFields", {}).get("session_id", None)
-    print(f"session_id: {session_id}")
-    if session_id is not None:
-        chat_history = get_chat_history(session_id)
-        if chat_history is None:
-            chat_history = []
-            create_chat_history(session_id, chat_history)
-    else:
-        session_id = str(uuid.uuid4())
-        chat_history = []
-        create_chat_history(session_id, chat_history)
-
-    print(f"chat_history: {chat_history}")
-
-    openai_params = await convert_bedrock_to_openai(model_id, body, True)
-    print(f"openai_params: {openai_params}")
-
-    # Append the user message to chat_history
-    user_messages_this_round = [
-        m for m in openai_params["messages"] if m["role"] == "user"
-    ]
-    if user_messages_this_round:
-        chat_history.append(user_messages_this_round[-1])
-    print(f"chat_history: {chat_history}")
-
-    # Pass the entire chat_history to the LLM
-    openai_params["messages"] = chat_history
-    print(f"openai_params: {openai_params}")
-
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         api_key = auth_header[len("Bearer ") :]
@@ -445,6 +464,41 @@ async def process_streaming_chat_request(
         raise HTTPException(
             status_code=401, detail={"error": "Missing or invalid Authorization header"}
         )
+
+    provided_hash = hash_api_key(api_key)
+    session_id = body.get("additionalModelRequestFields", {}).get("session_id", None)
+
+    if session_id is not None:
+        session_data = get_session_data(session_id)
+        if session_data is not None:
+            if session_data["api_key_hash"] != provided_hash:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Unauthorized: API key does not match session owner",
+                )
+            chat_history = (
+                session_data["chat_history"] if session_data["chat_history"] else []
+            )
+        else:
+            chat_history = []
+            create_chat_history(session_id, chat_history, provided_hash)
+    else:
+        session_id = str(uuid.uuid4())
+        chat_history = []
+        create_chat_history(session_id, chat_history, provided_hash)
+
+    openai_params = await convert_bedrock_to_openai(model_id, body, True)
+
+    # Append the user message to chat_history
+    user_messages_this_round = [
+        m for m in openai_params["messages"] if m["role"] == "user"
+    ]
+    if user_messages_this_round:
+        chat_history.append(user_messages_this_round[-1])
+
+    openai_params["messages"] = chat_history
+
+    print(f'final message sent to llm: {openai_params["messages"]}')
 
     client = AsyncOpenAI(api_key=api_key, base_url=LITELLM_ENDPOINT)
     stream = await client.chat.completions.create(**openai_params)
@@ -523,10 +577,17 @@ async def handle_bedrock_streaming_request(model_id: str, request: Request):
     except HTTPException as he:
         return JSONResponse(
             status_code=400,
-            content=he.detail,
+            content={
+                "Message": he.detail,
+            },
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content=f"Internal server error: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "Message": f"Internal server error: {str(e)}",
+            },
+        )
 
 
 @app.post("/bedrock/model/{prompt_arn_prefix}/{prompt_id}/converse")
@@ -545,14 +606,21 @@ async def handle_bedrock_request(model_id: str, request: Request):
             content=bedrock_response, headers={"X-Session-Id": session_id}
         )
     except HTTPException as he:
-        print(f"exception: {he}")
+        print(f"HTTPException he: {he}")
         return JSONResponse(
-            status_code=400,
-            content=he.detail,
+            status_code=he.status_code,
+            content={
+                "Message": he.detail,
+            },
         )
     except Exception as e:
-        print(f"exception: {e}")
-        return JSONResponse(status_code=500, content=f"Internal server error: {str(e)}")
+        print(f"exception e: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "Message": f"Internal server error: {str(e)}",
+            },
+        )
 
 
 async def forward_openai_stream(stream) -> AsyncGenerator[bytes, None]:
@@ -571,39 +639,13 @@ async def forward_openai_stream(stream) -> AsyncGenerator[bytes, None]:
 @app.post("/v1/chat/completions")
 @app.post("/chat/completions")
 async def proxy_request(request: Request):
-    # Read raw request data
     body = await request.body()
 
     try:
-        # Parse request data
         data = json.loads(body)
         is_streaming = data.get("stream", False)
 
-        # Extract session_id if provided
         session_id = data.pop("session_id", None)
-
-        if session_id is not None:
-            chat_history = get_chat_history(session_id)
-            if chat_history is None:
-                chat_history = []
-                create_chat_history(session_id, chat_history)
-        else:
-            # No session_id provided, create one
-            session_id = str(uuid.uuid4())
-            chat_history = []
-            create_chat_history(session_id, chat_history)
-
-        # Merge incoming user messages into chat history
-        # data["messages"] are in OpenAI format: [{"role": "user"|"assistant"|"system", "content": "..."}]
-        user_messages_this_round = [
-            m for m in data.get("messages", []) if m["role"] == "user"
-        ]
-        if user_messages_this_round:
-            # Append only the last user message to the chat history
-            chat_history.append(user_messages_this_round[-1])
-
-        # Replace data["messages"] with the full chat_history
-        data["messages"] = chat_history
 
         # Get API key from headers
         api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
@@ -612,15 +654,45 @@ async def proxy_request(request: Request):
                 status_code=401,
                 detail={"error": "Missing or invalid Authorization header"},
             )
+        provided_hash = hash_api_key(api_key)
 
-        # Check if model is a prompt ARN and handle prompt logic as before
+        if session_id is not None:
+            session_data = get_session_data(session_id)
+            if session_data is not None:
+                if session_data["api_key_hash"] != provided_hash:
+                    raise HTTPException(
+                        status_code=401,
+                        detail={
+                            "error": "Unauthorized: API key does not match session owner"
+                        },
+                    )
+                chat_history = (
+                    session_data["chat_history"] if session_data["chat_history"] else []
+                )
+            else:
+                chat_history = []
+                create_chat_history(session_id, chat_history, provided_hash)
+        else:
+            session_id = str(uuid.uuid4())
+            chat_history = []
+            create_chat_history(session_id, chat_history, provided_hash)
+
+        # Merge incoming user messages into chat history
+        user_messages_this_round = [
+            m for m in data.get("messages", []) if m["role"] == "user"
+        ]
+        if user_messages_this_round:
+            chat_history.append(user_messages_this_round[-1])
+
+        data["messages"] = chat_history
+
+        # Check for prompt ARN logic
         model_id = data.get("model")
         prompt_variables = data.pop("promptVariables", {})
         final_prompt_text = None
         if model_id and model_id.startswith("arn:aws:bedrock:"):
             prompt_id, prompt_version = parse_prompt_arn(model_id)
             if prompt_id:
-                # Fetch the prompt
                 if prompt_version:
                     prompt = bedrock_client.get_prompt(
                         promptIdentifier=prompt_id, promptVersion=prompt_version
@@ -632,25 +704,20 @@ async def proxy_request(request: Request):
                 variant = variants[0]
                 template_text = variant["templateConfiguration"]["text"]["text"]
 
-                # Validate and construct the final prompt text
                 validate_prompt_variables(template_text, prompt_variables)
                 final_prompt_text = construct_prompt_text_from_variables(
                     template_text, prompt_variables
                 )
 
-                # If we have a model inside the variant, use that
                 if "modelId" in variant:
                     data["model"] = variant["modelId"]
 
-        # If we got a final_prompt_text, replace data["messages"] entirely with a single user message
         if final_prompt_text:
             data["messages"] = [{"role": "user", "content": final_prompt_text}]
 
-        # Initialize OpenAI client
         client = AsyncOpenAI(api_key=api_key, base_url=LITELLM_ENDPOINT)
 
         if is_streaming:
-            # Handle streaming request
             stream = await client.chat.completions.create(**data)
 
             assistant_content_parts = []
@@ -659,33 +726,25 @@ async def proxy_request(request: Request):
                 first_chunk = True
                 async for chunk in stream:
                     chunk_dict = chunk.model_dump()
-                    print(f"chunk_dict before: {chunk_dict}")
                     if first_chunk:
                         chunk_dict["session_id"] = session_id
                         first_chunk = False
-                    # Write out the chunk immediately
                     yield f"data: {json.dumps(chunk_dict)}\n\n".encode("utf-8")
 
-                    # Extract assistant delta content if available
                     choice = chunk_dict["choices"][0]
                     delta = choice.get("delta", {})
                     finish_reason = choice.get("finish_reason")
-                    print(f"chunk_dict after: {chunk_dict}")
                     if "content" in delta and delta["content"]:
                         assistant_content_parts.append(delta["content"])
 
                     if finish_reason == "stop":
-                        # Once we hit stop, we can finalize the assistant message
                         break
 
             async def finalizing_stream():
-                # Stream the response back to the client
                 async for event in stream_wrapper():
                     yield event
 
-                # After streaming is done, append the assistant message to chat history
                 if assistant_content_parts:
-                    print(f"assistant_content_parts: {assistant_content_parts}")
                     assistant_message = {
                         "role": "assistant",
                         "content": "".join(assistant_content_parts),
@@ -699,11 +758,9 @@ async def proxy_request(request: Request):
             return response
 
         else:
-            # Handle non-streaming request
             response = await client.chat.completions.create(**data)
             response_dict = response.model_dump()
 
-            # Append assistant's response to chat history
             if response_dict.get("choices"):
                 assistant_message = response_dict["choices"][0]["message"]
                 chat_history.append(
@@ -726,7 +783,6 @@ async def proxy_request(request: Request):
     except HTTPException as he:
         return JSONResponse(status_code=he.status_code, content=he.detail)
     except Exception as e:
-        print(f"Exception in proxy_request: {e}")
         return Response(
             content=json.dumps({"error": str(e)}),
             status_code=500,
@@ -737,35 +793,6 @@ async def proxy_request(request: Request):
 def convert_openai_to_bedrock_history(
     openai_history: List[Dict[str, str]]
 ) -> Dict[str, Any]:
-    """
-    Convert a list of OpenAI-format messages into Bedrock converse API format.
-
-    OpenAI format:
-    [
-      {"role":"system","content":"..."},
-      {"role":"user","content":"..."},
-      {"role":"assistant","content":"..."}
-    ]
-
-    Bedrock format:
-    {
-      "messages": [
-        {
-          "role": "user",
-          "content": [{"text":"user message"}]
-        },
-        {
-          "role": "assistant",
-          "content": [{"text":"assistant message"}]
-        }
-      ],
-      "system": [
-        {
-          "text":"system message"
-        }
-      ]
-    }
-    """
     system_messages = []
     bedrock_messages = []
 
@@ -786,9 +813,26 @@ async def get_bedrock_chat_history(request: Request):
     session_id = body.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
-    chat_history = get_chat_history(session_id)
+
+    # We must verify the API key for this history as well
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        api_key = auth_header[len("Bearer ") :]
+    else:
+        raise HTTPException(
+            status_code=401, detail={"error": "Missing or invalid Authorization header"}
+        )
+    provided_hash = hash_api_key(api_key)
+
+    session_data = get_session_data(session_id)
+    if not session_data or session_data["api_key_hash"] != provided_hash:
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Unauthorized: API key does not match session owner"},
+        )
+
+    chat_history = session_data["chat_history"]
     if chat_history is None:
-        # If no chat history, return empty arrays
         return {"messages": [], "system": []}
     bedrock_format = convert_openai_to_bedrock_history(chat_history)
     return bedrock_format
@@ -800,10 +844,27 @@ async def get_openai_chat_history(request: Request):
     session_id = body.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
-    chat_history = get_chat_history(session_id)
+
+    # Verify the API key
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        api_key = auth_header[len("Bearer ") :]
+    else:
+        raise HTTPException(
+            status_code=401, detail={"error": "Missing or invalid Authorization header"}
+        )
+    provided_hash = hash_api_key(api_key)
+
+    session_data = get_session_data(session_id)
+    if not session_data or session_data["api_key_hash"] != provided_hash:
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Unauthorized: API key does not match session owner"},
+        )
+
+    chat_history = session_data["chat_history"]
     if chat_history is None:
         chat_history = []
-    # Return directly in OpenAI format
     return {"messages": chat_history}
 
 

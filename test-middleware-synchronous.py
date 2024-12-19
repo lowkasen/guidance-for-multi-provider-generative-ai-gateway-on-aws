@@ -43,7 +43,7 @@ def create_bedrock_client():
 def send_message(
     client,
     message,
-    model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    model_id="anthropic.claude-3-haiku-20240307-v1:0",
     session_id=None,
 ):
     """
@@ -91,7 +91,7 @@ def main():
         client = create_bedrock_client()
 
         # Send a test message
-        response = send_message(client=client, message="Hello, how are you?")
+        response = send_message(client=client, message="tell me a short story.")
 
         print("Response:", response)
         session_id = response["ResponseMetadata"]["HTTPHeaders"].get("x-session-id")
