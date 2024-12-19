@@ -618,6 +618,21 @@ else:
     print("Response:", response_bedrock.text)
 ```
 
+You can get all session ids for an api key by calling POST `/session-ids` like this:
+
+```
+endpoint = f"{base_url}/session-ids"
+headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+response = requests.post(endpoint, headers=headers, json={})
+if response.status_code == 200:
+    print("Success!")
+    print("Session IDs:", response.json().get("session_ids", []))
+else:
+    print(f"Error: {response.status_code}")
+    print(response.text)
+```
+
 ## Open Source Library
 
 For detailed information about the open source libraries used in this application, please refer to the [ATTRIBUTION](ATTRIBUTION.md) file.
