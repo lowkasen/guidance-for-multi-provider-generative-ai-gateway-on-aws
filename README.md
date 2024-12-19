@@ -500,6 +500,8 @@ return response.choices[0].message.content
 
 Middleware layer also supports chat history, via a `session_id`
 
+Note: A `session_id` is tied to a specific api key. Only that api key can access that chat history associated with the session. May eventually make an exception for admins. May eventually allow a single user across multiple api keys to own a `session_id`
+
 To use this with the OpenAI Interface when not using streaming, do the following:
 
 ```
