@@ -734,6 +734,79 @@ async def proxy_request(request: Request):
         )
 
 
+def convert_openai_to_bedrock_history(
+    openai_history: List[Dict[str, str]]
+) -> Dict[str, Any]:
+    """
+    Convert a list of OpenAI-format messages into Bedrock converse API format.
+
+    OpenAI format:
+    [
+      {"role":"system","content":"..."},
+      {"role":"user","content":"..."},
+      {"role":"assistant","content":"..."}
+    ]
+
+    Bedrock format:
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": [{"text":"user message"}]
+        },
+        {
+          "role": "assistant",
+          "content": [{"text":"assistant message"}]
+        }
+      ],
+      "system": [
+        {
+          "text":"system message"
+        }
+      ]
+    }
+    """
+    system_messages = []
+    bedrock_messages = []
+
+    for msg in openai_history:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        if role == "system":
+            system_messages.append({"text": content})
+        else:
+            bedrock_messages.append({"role": role, "content": [{"text": content}]})
+
+    return {"messages": bedrock_messages, "system": system_messages}
+
+
+@app.post("/bedrock/chat-history")
+async def get_bedrock_chat_history(request: Request):
+    body = await request.json()
+    session_id = body.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    chat_history = get_chat_history(session_id)
+    if chat_history is None:
+        # If no chat history, return empty arrays
+        return {"messages": [], "system": []}
+    bedrock_format = convert_openai_to_bedrock_history(chat_history)
+    return bedrock_format
+
+
+@app.post("/chat-history")
+async def get_openai_chat_history(request: Request):
+    body = await request.json()
+    session_id = body.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    chat_history = get_chat_history(session_id)
+    if chat_history is None:
+        chat_history = []
+    # Return directly in OpenAI format
+    return {"messages": chat_history}
+
+
 if __name__ == "__main__":
     import uvicorn
 

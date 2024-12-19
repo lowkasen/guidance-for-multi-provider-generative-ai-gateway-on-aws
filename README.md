@@ -582,6 +582,40 @@ response2 = client.converse_stream(
 ```
 The `session_id` is returned as a header in `response["ResponseMetadata"]["HTTPHeaders"]`. And you pass that `session_id` in the `additionalModelRequestFields` parameter to continue the same conversation
 
+
+You can get the chat history for a given session id by calling POST `/chat-history` for history in OpenAI format, or POST `/bedrock/chat-history` for history in AWS Bedrock Converse API format, like this:
+```
+# Common headers, including authorization
+headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+# Request body containing session_id
+payload = {"session_id": session_id}
+
+# Endpoint to get chat history in OpenAI format
+openai_url = f"{base_url}/chat-history"
+response_openai = requests.post(openai_url, json=payload, headers=headers)
+
+if response_openai.status_code == 200:
+    print("OpenAI Format History:")
+    print(response_openai.json())
+else:
+    print("Failed to retrieve OpenAI format history")
+    print("Status code:", response_openai.status_code)
+    print("Response:", response_openai.text)
+
+# Endpoint to get chat history in Bedrock format
+bedrock_url = f"{base_url}/bedrock/chat-history"
+response_bedrock = requests.post(bedrock_url, json=payload, headers=headers)
+
+if response_bedrock.status_code == 200:
+    print("\nBedrock Format History:")
+    print(response_bedrock.json())
+else:
+    print("Failed to retrieve Bedrock format history")
+    print("Status code:", response_bedrock.status_code)
+    print("Response:", response_bedrock.text)
+```
+
 ## Open Source Library
 
 For detailed information about the open source libraries used in this application, please refer to the [ATTRIBUTION](ATTRIBUTION.md) file.

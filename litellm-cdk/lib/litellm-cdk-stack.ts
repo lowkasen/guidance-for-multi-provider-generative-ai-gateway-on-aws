@@ -392,7 +392,7 @@ export class LitellmCdkStack extends cdk.Stack {
     listener.addAction('OpenAIPaths', {
       priority: 6,
       conditions: [
-        elasticloadbalancingv2.ListenerCondition.pathPatterns(['/v1/chat/completions', '/chat/completions']),
+        elasticloadbalancingv2.ListenerCondition.pathPatterns(['/v1/chat/completions', '/chat/completions', '/chat-history']),
       ],
       action: elasticloadbalancingv2.ListenerAction.forward([targetGroup]),
     });
