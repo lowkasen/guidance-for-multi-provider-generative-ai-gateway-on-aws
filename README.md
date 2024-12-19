@@ -497,6 +497,91 @@ response = client.chat.completions.create(
 )
 return response.choices[0].message.content
 ```
+
+Middleware layer also supports chat history, via a `session_id`
+
+To use this with the OpenAI Interface when not using streaming, do the following:
+
+```
+response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            stream=False,
+        )
+
+session_id = response.model_extra.get("session_id")
+
+response_2 = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt2}],
+            stream=False,
+            extra_body={"session_id": session_id}
+        )
+```
+The `session_id` is returned as part of the `response.model_extra` dictionary. And you pass that `session_id` in the `extra_body` parameter to continue the same conversation
+
+To use this with the OpenAI Interface with streaming, do the following:
+
+```
+stream = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            stream=True,
+        )
+
+session_id = None
+first_chunk = True
+
+for chunk in stream:
+    # Get session_id from first chunk
+    if first_chunk:
+        session_id = getattr(chunk, "session_id", None)
+        first_chunk = False
+    
+    #Do normal processing on all chunks
+
+stream2 = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            stream=True,
+            extra_body={"session_id": session_id}
+        )
+```
+The `session_id` is returned as part of the first chunk of the response stream. And you pass that `session_id` in the `extra_body` parameter to continue the same conversation
+
+To use this with the Bedrock interface, do the following:
+```
+response = client.converse(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": message}]}],
+            )
+
+session_id = response["ResponseMetadata"]["HTTPHeaders"].get("x-session-id")
+
+response2 = client.converse(
+                modelId=model_id,
+                additionalModelRequestFields={"session_id": session_id},
+                messages=[{"role": "user", "content": [{"text": message2}]}],
+            )
+```
+The `session_id` is returned as a header in `response["ResponseMetadata"]["HTTPHeaders"]`. And you pass that `session_id` in the `additionalModelRequestFields` parameter to continue the same conversation
+
+The approach with Bedrock interface with streaming is identical, but included here for completion:
+```
+response = client.converse_stream(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": message}]}],
+            )
+session_id = response["ResponseMetadata"]["HTTPHeaders"].get("x-session-id")
+
+response2 = client.converse_stream(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": message2}]}],
+                additionalModelRequestFields={"session_id": session_id},
+            )
+```
+The `session_id` is returned as a header in `response["ResponseMetadata"]["HTTPHeaders"]`. And you pass that `session_id` in the `additionalModelRequestFields` parameter to continue the same conversation
+
 ## Open Source Library
 
 For detailed information about the open source libraries used in this application, please refer to the [ATTRIBUTION](ATTRIBUTION.md) file.
