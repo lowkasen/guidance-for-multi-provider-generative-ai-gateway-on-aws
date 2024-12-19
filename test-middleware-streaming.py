@@ -80,7 +80,7 @@ def extract_session_id(response) -> Optional[str]:
 def send_message_stream(
     client,
     message: str,
-    model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    model_id: str = "anthropic.claude-3-haiku-20240307-v1:0",
     max_tokens: int = 1000,
     temperature: float = 0.7,
 ) -> Generator[Dict[str, Any], None, None]:
@@ -109,7 +109,7 @@ def send_message_stream(
                     "maxTokens": max_tokens,
                     "temperature": temperature,
                 },
-                additionalModelRequestFields={"session-id": global_session_id},
+                additionalModelRequestFields={"session_id": global_session_id},
             )
         else:
             response = client.converse_stream(
@@ -192,7 +192,7 @@ def main():
 
     # Example of using streaming response
     print("Sending streaming request...")
-    message = "Hi how are you."
+    message = "tell me a short story."
     send_message_stream_wrapper(client=client, message=message)
     message2 = "What did I last say to you?"
     send_message_stream_wrapper(client=client, message=message2)
