@@ -64,7 +64,6 @@ def setup_database():
             columns = [c.name for c in chat_sessions_table.columns]
             if "api_key_hash" not in columns:
                 with engine.connect() as conn:
-                    # Use text() to create an executable SQL expression
                     conn.execute(
                         text(
                             "ALTER TABLE chat_sessions ADD COLUMN api_key_hash VARCHAR;"
@@ -75,7 +74,26 @@ def setup_database():
                 chat_sessions_table = Table(
                     "chat_sessions", metadata_obj, autoload_with=engine
                 )
-            print("chat_sessions table already exists")
+            else:
+                print("chat_sessions table already exists with api_key_hash column")
+
+        # Check if the index already exists
+        indexes = inspector.get_indexes("chat_sessions")
+        index_names = [idx["name"] for idx in indexes]
+
+        if "idx_chat_sessions_api_key_hash" not in index_names:
+            print(
+                "Creating index idx_chat_sessions_api_key_hash on api_key_hash column."
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "CREATE INDEX idx_chat_sessions_api_key_hash ON chat_sessions (api_key_hash)"
+                    )
+                )
+                conn.commit()
+        else:
+            print("Index idx_chat_sessions_api_key_hash already exists.")
 
         return engine, chat_sessions_table
     except SQLAlchemyError as e:
@@ -866,6 +884,31 @@ async def get_openai_chat_history(request: Request):
     if chat_history is None:
         chat_history = []
     return {"messages": chat_history}
+
+
+@app.post("/session-ids")
+async def list_session_ids_for_api_key(request: Request):
+    # Verify the API key
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        api_key = auth_header[len("Bearer ") :]
+    else:
+        raise HTTPException(
+            status_code=401, detail={"error": "Missing or invalid Authorization header"}
+        )
+
+    provided_hash = hash_api_key(api_key)
+
+    # Query all session_ids for this api_key_hash
+    with db_engine.connect() as conn:
+        stmt = select(chat_sessions.c.session_id).where(
+            chat_sessions.c.api_key_hash == provided_hash
+        )
+        results = conn.execute(stmt).fetchall()
+
+    session_ids = [row[0] for row in results]
+
+    return {"session_ids": session_ids}
 
 
 if __name__ == "__main__":

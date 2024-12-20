@@ -378,7 +378,7 @@ export class LitellmCdkStack extends cdk.Stack {
           containerPort: 3000,
           listener: 'Listener',
           priority: 5,
-          pathPattern: '/bedrock*',
+          pathPattern: '/bedrock/model/*',
         }
       ],
       desiredCount: 1,
@@ -392,7 +392,15 @@ export class LitellmCdkStack extends cdk.Stack {
     listener.addAction('OpenAIPaths', {
       priority: 6,
       conditions: [
-        elasticloadbalancingv2.ListenerCondition.pathPatterns(['/v1/chat/completions', '/chat/completions', '/chat-history']),
+        elasticloadbalancingv2.ListenerCondition.pathPatterns(['/v1/chat/completions', '/chat/completions', '/chat-history', '/bedrock/chat-history', '/bedrock/health/liveliness']),
+      ],
+      action: elasticloadbalancingv2.ListenerAction.forward([targetGroup]),
+    });
+
+    listener.addAction('MorePaths', {
+      priority: 7,
+      conditions: [
+        elasticloadbalancingv2.ListenerCondition.pathPatterns(['/session-ids']),
       ],
       action: elasticloadbalancingv2.ListenerAction.forward([targetGroup]),
     });
