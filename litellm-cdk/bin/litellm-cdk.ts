@@ -10,6 +10,8 @@ const ecrLitellmRepository = String(app.node.tryGetContext("ecrLitellmRepository
 const ecrMiddlewareRepository = String(app.node.tryGetContext("ecrMiddlewareRepository"));
 const certificateArn = String(app.node.tryGetContext("certificateArn"));
 const domainName = String(app.node.tryGetContext("domainName"));
+const oktaIssuer = String(app.node.tryGetContext("oktaIssuer"));
+const oktaAudience = String(app.node.tryGetContext("oktaAudience"));
 const logBucketArn = String(app.node.tryGetContext("logBucketArn"));
 const openaiApiKey = String(app.node.tryGetContext("openaiApiKey"));
 const azureOpenAiApiKey = String(app.node.tryGetContext("azureOpenAiApiKey"));
@@ -36,6 +38,8 @@ const deepseekApiKey = String(app.node.tryGetContext("deepseekApiKey"));
 new LitellmCdkStack(app, 'LitellmCdkStack', {
   domainName: domainName,
   certificateArn: certificateArn,
+  oktaIssuer: oktaIssuer,
+  oktaAudience: oktaAudience,
   liteLLMVersion: liteLLMVersion,
   architecture: architecture,
   ecrLitellmRepository: ecrLitellmRepository,
