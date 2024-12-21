@@ -1,6 +1,6 @@
 # AWS GenAI Gateway
 
-Project ACTIVE as of Dec 13, 2024
+Project ACTIVE as of Dec 20, 2024
 
 ## Project Overview
 
