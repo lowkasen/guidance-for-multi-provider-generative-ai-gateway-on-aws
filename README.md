@@ -470,7 +470,9 @@ def create_bedrock_client():
 
 Once that client is initialized, you can use it exactly as you would use boto3 to call AWS Bedrock directly (currently only supports `converse` and `converse_stream`)
 
-The middleware layer also has support for Bedrock Prompt Management Prompts. It works the same as documented here: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/bedrock-runtime/client/converse.html#
+#### Bedrock Managed Prompts
+
+The middleware layer also has support for Bedrock Managed Prompts. It works the same as documented here: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/bedrock-runtime/client/converse.html#
 
 You can use a managed prompt like this:
 ```
@@ -497,6 +499,8 @@ response = client.chat.completions.create(
 )
 return response.choices[0].message.content
 ```
+
+#### Chat History
 
 Middleware layer also supports chat history, via a `session_id`
 
