@@ -50,6 +50,8 @@ fi
 
 echo "Certificate Arn: " $CERTIFICATE_ARN
 echo "Domain Name: " $DOMAIN_NAME
+echo "OKTA_ISSUER: $OKTA_ISSUER"
+echo "OKTA_AUDIENCE: $OKTA_AUDIENCE"
 echo "LiteLLM Version: " $LITELLM_VERSION
 echo "Skipping container build: " $SKIP_BUILD
 echo "Build from source: " $BUILD_FROM_SOURCE
@@ -154,6 +156,8 @@ cdk deploy "$STACK_NAME" \
 --context ecrMiddlewareRepository=$MIDDLEWARE_APP_NAME \
 --context certificateArn=$CERTIFICATE_ARN \
 --context domainName=$DOMAIN_NAME \
+--context oktaIssuer=$OKTA_ISSUER \
+--context oktaAudience=$OKTA_AUDIENCE \
 --context logBucketArn=$LOG_BUCKET_ARN \
 --context openaiApiKey=$OPENAI_API_KEY \
 --context azureOpenAiApiKey=$AZURE_OPENAI_API_KEY \

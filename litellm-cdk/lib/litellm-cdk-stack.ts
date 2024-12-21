@@ -20,6 +20,8 @@ import * as elasticache from 'aws-cdk-lib/aws-elasticache';
 interface LiteLLMStackProps extends cdk.StackProps {
   domainName: string;
   certificateArn: string;
+  oktaIssuer: string;
+  oktaAudience: string;
   liteLLMVersion: string;
   architecture: string;
   ecrLitellmRepository: string;
@@ -333,6 +335,11 @@ export class LitellmCdkStack extends cdk.Stack {
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'Middleware' }),
       secrets: {
         DATABASE_MIDDLEWARE_URL: ecs.Secret.fromSecretsManager(dbMiddlewareUrlSecret),
+        MASTER_KEY: ecs.Secret.fromSecretsManager(litellmMasterAndSaltKeySecret, 'LITELLM_MASTER_KEY'),
+      },
+      environment: {
+        OKTA_ISSUER: props.oktaIssuer,
+        OKTA_AUDIENCE: props.oktaAudience,
       }
     });  
 
@@ -400,7 +407,7 @@ export class LitellmCdkStack extends cdk.Stack {
     listener.addAction('MorePaths', {
       priority: 7,
       conditions: [
-        elasticloadbalancingv2.ListenerCondition.pathPatterns(['/session-ids']),
+        elasticloadbalancingv2.ListenerCondition.pathPatterns(['/session-ids', '/key/generate', '/user/new']),
       ],
       action: elasticloadbalancingv2.ListenerAction.forward([targetGroup]),
     });

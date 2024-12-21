@@ -633,6 +633,50 @@ else:
     print(response.text)
 ```
 
+#### Okta Oauth 2.0 JWT Token Support
+
+This solution supports creating LiteLLM users using an Okta Oauth 2.0 JWT
+
+In your `.env` file, you must provide your `OKTA_ISSUER` (something like https://dev-12345.okta.com/oauth2/default) and your `OKTA_AUDIENCE` (default is `api://default`, but set it to whatever makes sense for your Okta setup)
+
+Any user created with an Okta JWT will be a non admin `internal_user` role. Only someone with the master key (or users/keys derived from the master key) will be able to perform any admin operations. At a later point, we may make it so that someone with a specific Okta claim is able to act as an admin and bypass these restrictions without needing the master key.
+
+Their `user_id` will be the `sub` of the Okta User's claims.
+
+Right now, these users can give themselves any `max_budget`, `tpm_limit`, `rpm_limit`, `max_parallel_requests`, or `teams`. At a later point, we may lock these down more, or make a default configurable in the deployment.
+
+Once you have configured your Okta settings, you can create a user like this:
+
+Request
+```
+curl -X POST "https://<Your-Proxy-Endpoint>/user/new" \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer <Okta Oauth 2.0 JWT>" \
+-d '{
+ }'
+ ```
+
+ Response
+ ```
+ {"key_alias":null,"duration":null,"models":[],"spend":0.0,"max_budget":1000000000.0,"user_id":"testuser@mycompany.com","team_id":null,"max_parallel_requests":null,"metadata":{},"tpm_limit":null,"rpm_limit":null,"budget_duration":"1mo","allowed_cache_controls":[],"soft_budget":null,"config":{},"permissions":{},"model_max_budget":{},"send_invite_email":null,"model_rpm_limit":null,"model_tpm_limit":null,"guardrails":null,"blocked":null,"aliases":{},"key":"<New_Api_Key_Tied_To_Okta_User>","key_name":null,"expires":null,"token_id":null,"user_email":"testuser@mycompany.com","user_role":"internal_user","teams":null,"user_alias":null}
+ ```
+
+With the returned API key, you use LiteLLM as you normally would.
+
+You can also create additional api keys tied to your user:
+
+```
+curl -X POST "https://<Your-Proxy-Endpoint>/key/generate" \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer <New_Api_Key_Tied_To_Okta_User>" \
+-d '{"user_id": "testuser@mycompany.com" }'
+```
+
+Reponse
+```
+{"key_alias":null,"duration":null,"models":[],"spend":0.0,"max_budget":null,"user_id":"testuser@mycompany.com","team_id":null,"max_parallel_requests":null,"metadata":{},"tpm_limit":null,"rpm_limit":null,"budget_duration":null,"allowed_cache_controls":[],"soft_budget":null,"config":{},"permissions":{},"model_max_budget":{},"send_invite_email":null,"model_rpm_limit":null,"model_tpm_limit":null,"guardrails":null,"blocked":null,"aliases":{},"key":"<Second_Api_Key_Tied_To_Okta_User>","key_name":"sk-...fbcg","expires":null,"token_id":"8bb9cb70ce3ed3b7907dfbaae525e06a2fec6601dbe930b5571c0aca12552378"}     
+```
+
 ## Open Source Library
 
 For detailed information about the open source libraries used in this application, please refer to the [ATTRIBUTION](ATTRIBUTION.md) file.

@@ -23,6 +23,8 @@ from sqlalchemy import (
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import select, insert, update
 import hashlib
+from okta_jwt_verifier import AccessTokenVerifier
+from okta_jwt_verifier.jwt_utils import JWTUtils
 
 app = FastAPI()
 
@@ -34,6 +36,21 @@ bedrock_client = boto3.client("bedrock-agent")
 db_engine = None
 metadata = MetaData()
 chat_sessions = None
+
+OKTA_ISSUER = os.environ.get("OKTA_ISSUER")
+OKTA_AUDIENCE = os.environ.get("OKTA_AUDIENCE")
+MASTER_KEY = os.environ.get("MASTER_KEY")
+
+# Create a verifier instance for Access Tokens
+access_token_verifier = None
+if OKTA_AUDIENCE and OKTA_ISSUER:
+    access_token_verifier = AccessTokenVerifier(
+        issuer=OKTA_ISSUER, audience=OKTA_AUDIENCE
+    )
+else:
+    print(
+        f"OKTA_AUDIENCE or OKTA_ISSUER are empty. Support for Okta JWT Auth is disabled."
+    )
 
 
 def setup_database():
@@ -909,6 +926,88 @@ async def list_session_ids_for_api_key(request: Request):
     session_ids = [row[0] for row in results]
 
     return {"session_ids": session_ids}
+
+
+# ToDo: Enforce that a non-admin user can only create keys for themself if this bug isn't fixed in a timely manner https://github.com/BerriAI/litellm/issues/7336
+@app.post("/key/generate")
+async def forward_key_generate(request: Request):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{LITELLM_ENDPOINT}/key/generate",
+            content=await request.body(),
+            headers=request.headers,
+        )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=response.headers,
+        )
+
+
+@app.post("/user/new")
+async def forward_user_new(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401, detail={"error": "Missing or invalid Authorization header"}
+        )
+
+    token = auth_header[len("Bearer ") :]
+    final_headers = dict(request.headers)
+    request_body = await request.body()
+    body_json = json.loads(request_body)
+
+    if not token.startswith("sk-") and access_token_verifier:
+        print(f"token is not api key, assume it is JWT")
+        # Handle as JWT
+        try:
+            await access_token_verifier.verify(token)
+            print(f"token is verified.")
+        except Exception as e:
+            print(f"exception: {e}")
+            # If the JWT verification fails, user is not authorized.
+            raise HTTPException(
+                status_code=401, detail={"error": "Invalid or expired token"}
+            ) from e
+
+        headers, claims, signing_input, signature = JWTUtils.parse_token(token)
+        print(
+            f"headers: {headers} claims: {claims} signing_input: {signing_input} signature: {signature}"
+        )
+
+        sub = claims.get("sub")
+        print(f"sub: {sub}")
+        if not sub:
+            raise HTTPException(
+                status_code=403, detail={"error": "No sub claim found in the token"}
+            )
+
+        # For random Okta users, we want to bind their okta sub/id to their litellm user_id. So that the relationship between okta users and litellm users is 1:1
+        # We also want random Okta users to not be able to make themselves admins, so we lock their user_role to "internal_user"
+        # Only someone with the master key (or users/keys derived from the master key) will be able to perform any admin operations
+        # At a later point, we can decide that someone with a specific Okta claim is able to act as an admin and bypass these restrictions without needing the master key
+        # Right now, users can give themselves any max_budget, tpm_limit, rpm_limit, max_parallel_requests, or teams. At a later point, we can lock these down more, or make a default configurable in the deployment.
+        body_json["user_email"] = sub
+        body_json["user_id"] = sub
+        body_json["user_role"] = "internal_user"
+        print(f"body_json: {body_json}")
+        request_body = json.dumps(body_json).encode()
+        final_headers["content-length"] = str(len(request_body))
+        final_headers["authorization"] = f"Bearer {MASTER_KEY}"
+
+    print(f"final_headers: {final_headers}")
+    print(f"request_body: {request_body}")
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{LITELLM_ENDPOINT}/user/new",
+            content=request_body,
+            headers=final_headers,
+        )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=response.headers,
+        )
 
 
 if __name__ == "__main__":
