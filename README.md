@@ -639,7 +639,7 @@ This solution supports creating LiteLLM users using an Okta Oauth 2.0 JWT
 
 In your `.env` file, you must provide your `OKTA_ISSUER` (something like https://dev-12345.okta.com/oauth2/default) and your `OKTA_AUDIENCE` (default is `api://default`, but set it to whatever makes sense for your Okta setup)
 
-Any user created with an Okta JWT will be a non admin `internal_user` role. Only someone with the master key (or users/keys derived from the master key) will be able to perform any admin operations. At a later point, we may make it so that someone with a specific Okta claim is able to act as an admin and bypass these restrictions without needing the master key.
+Any user created with an Okta JWT will be a non admin `internal_user` role. Only someone with the master key (or Admin users/keys derived from the master key) will be able to perform any admin operations. At a later point, we may make it so that someone with a specific Okta claim is able to act as an admin and bypass these restrictions without needing the master key.
 
 Their `user_id` will be the `sub` of the Okta User's claims.
 
