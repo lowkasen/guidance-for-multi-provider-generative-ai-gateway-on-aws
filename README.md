@@ -6,7 +6,7 @@ Project ACTIVE as of Dec 13, 2024
 
 This project provides a simple CDK deployment of LiteLLM into ECS on AWS. It aims to be pre-configured with defaults that will allow most users to quickly get started with LiteLLM.
 
-It also provides additional features on top of LiteLLM such as an AWS Bedrock Interface (instead of the default OpenAI interface), and support for AWS Bedrock Managed Prompts.
+It also provides additional features on top of LiteLLM such as an AWS Bedrock Interface (instead of the default OpenAI interface), support for AWS Bedrock Managed Prompts, Chat History, and support for Okta Oauth 2.0 JWT Token Auth.
 
 ## How to deploy
 
@@ -637,7 +637,7 @@ else:
     print(response.text)
 ```
 
-#### Okta Oauth 2.0 JWT Token Support
+#### Okta Oauth 2.0 JWT Token Auth Support
 
 This solution supports creating LiteLLM users using an Okta Oauth 2.0 JWT
 
