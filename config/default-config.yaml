@@ -309,27 +309,6 @@ model_list:
     litellm_params:
       model: cohere/command-nightly
 
-  #AnyScale Models
-  - model_name: meta-llama/Llama-2-7b-chat-hf
-    litellm_params:
-      model: anyscale/meta-llama/Llama-2-7b-chat-hf
-
-  - model_name: meta-llama/Llama-2-13b-chat-hf
-    litellm_params:
-      model: anyscale/meta-llama/Llama-2-13b-chat-hf
-  
-  - model_name: meta-llama/Llama-2-70b-chat-hf
-    litellm_params:
-      model: anyscale/meta-llama/Llama-2-70b-chat-hf
-  
-  - model_name: mistralai/Mistral-7B-Instruct-v0.1
-    litellm_params:
-      model: anyscale/mistralai/Mistral-7B-Instruct-v0.1
-  
-  - model_name: codellama/CodeLlama-34b-Instruct-hf
-    litellm_params:
-      model: anyscale/codellama/CodeLlama-34b-Instruct-hf
-
   #Huggingface Models 
   #(Follow the below pattern to support any Huggingface serverless model you want to use from this list: https://huggingface.co/models?inference=warm&pipeline_tag=text-generation) 
   #(For custom models, text classification models, or dedicated inference endpoints, refer to the docs: https://docs.litellm.ai/docs/providers/huggingface)

@@ -28,7 +28,6 @@ const codestralApiKey = String(app.node.tryGetContext("codestralApiKey"));
 const mistralApiKey = String(app.node.tryGetContext("mistralApiKey"));
 const azureAiApiKey = String(app.node.tryGetContext("azureAiApiKey"));
 
-const anyscaleApiKey = String(app.node.tryGetContext("anyscaleApiKey"));
 const nvidiaNimApiKey = String(app.node.tryGetContext("nvidiaNimApiKey"));
 const xaiApiKey = String(app.node.tryGetContext("xaiApiKey"));
 const perplexityaiApiKey = String(app.node.tryGetContext("perplexityaiApiKey"));
@@ -59,7 +58,6 @@ new LitellmCdkStack(app, 'LitellmCdkStack', {
   codestralApiKey: codestralApiKey,
   mistralApiKey: mistralApiKey,
   azureAiApiKey: azureAiApiKey,
-  anyscaleApiKey: anyscaleApiKey,
   nvidiaNimApiKey: nvidiaNimApiKey,
   xaiApiKey: xaiApiKey,
   perplexityaiApiKey: perplexityaiApiKey,
