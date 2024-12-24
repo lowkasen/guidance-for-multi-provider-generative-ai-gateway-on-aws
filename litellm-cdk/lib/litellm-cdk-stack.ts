@@ -41,7 +41,6 @@ interface LiteLLMStackProps extends cdk.StackProps {
   codestralApiKey: string;
   mistralApiKey: string;
   azureAiApiKey: string;
-  anyscaleApiKey: string;
   nvidiaNimApiKey: string;
   xaiApiKey: string;
   perplexityaiApiKey: string;
@@ -197,7 +196,6 @@ export class LitellmCdkStack extends cdk.Stack {
           CODESTRAL_API_KEY: props.codestralApiKey,
           MISTRAL_API_KEY: props.mistralApiKey,
           AZURE_AI_API_KEY: props.azureAiApiKey,
-          ANYSCALE_API_KEY: props.anyscaleApiKey,
           NVIDIA_NIM_API_KEY: props.nvidiaNimApiKey,
           XAI_API_KEY: props.xaiApiKey,
           PERPLEXITYAI_API_KEY: props.perplexityaiApiKey,
@@ -309,7 +307,6 @@ export class LitellmCdkStack extends cdk.Stack {
         CODESTRAL_API_KEY: ecs.Secret.fromSecretsManager(litellmOtherSecrets, 'CODESTRAL_API_KEY'),
         MISTRAL_API_KEY: ecs.Secret.fromSecretsManager(litellmOtherSecrets, 'MISTRAL_API_KEY'),
         AZURE_AI_API_KEY: ecs.Secret.fromSecretsManager(litellmOtherSecrets, 'AZURE_AI_API_KEY'),
-        ANYSCALE_API_KEY: ecs.Secret.fromSecretsManager(litellmOtherSecrets, 'ANYSCALE_API_KEY'),
         NVIDIA_NIM_API_KEY: ecs.Secret.fromSecretsManager(litellmOtherSecrets, 'NVIDIA_NIM_API_KEY'),
         XAI_API_KEY: ecs.Secret.fromSecretsManager(litellmOtherSecrets, 'XAI_API_KEY'),
         PERPLEXITYAI_API_KEY: ecs.Secret.fromSecretsManager(litellmOtherSecrets, 'PERPLEXITYAI_API_KEY'),
