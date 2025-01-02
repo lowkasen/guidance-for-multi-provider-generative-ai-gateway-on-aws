@@ -16,6 +16,8 @@ import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as path from 'path';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import * as elasticache from 'aws-cdk-lib/aws-elasticache';
+import { Tag, Aspects } from 'aws-cdk-lib';
+import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 
 interface LiteLLMStackProps extends cdk.StackProps {
   domainName: string;
@@ -51,6 +53,8 @@ interface LiteLLMStackProps extends cdk.StackProps {
 export class LitellmCdkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: LiteLLMStackProps) {
     super(scope, id, props);
+
+    Aspects.of(this).add(new Tag('stack-id', this.stackName));
 
     const configBucket = new s3.Bucket(this, 'LiteLLMConfigBucket', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -116,8 +120,10 @@ export class LitellmCdkStack extends cdk.Stack {
       securityGroups: [dbSecurityGroup],
       credentials: rds.Credentials.fromSecret(databaseSecret),
       databaseName: 'litellm',
+      storageType: rds.StorageType.GP3,
+      storageEncrypted: true,
     });
-
+    
     const databaseMiddleware = new rds.DatabaseInstance(this, 'DatabaseMiddleware', {
       engine: rds.DatabaseInstanceEngine.postgres({
         version: rds.PostgresEngineVersion.VER_15,
@@ -129,7 +135,9 @@ export class LitellmCdkStack extends cdk.Stack {
       },
       securityGroups: [dbSecurityGroup],
       credentials: rds.Credentials.fromSecret(databaseMiddlewareSecret),
-      databaseName: 'middleware',
+      databaseName: 'middleware',    
+      storageType: rds.StorageType.GP3,
+      storageEncrypted: true,
     });
 
     const redisSecurityGroup = new ec2.SecurityGroup(this, 'RedisSecurityGroup', {
@@ -441,9 +449,45 @@ export class LitellmCdkStack extends cdk.Stack {
     new route53.ARecord(this, 'DNSRecord', {
       zone: hostedZone,
       target: route53.RecordTarget.fromAlias(
-        new targets.LoadBalancerTarget(fargateService.loadBalancer)
+        new targets.LoadBalancerTarget(fargateService.loadBalancers[0])
       ),
       recordName: props.domainName,  // This will be the full domain name
+    });
+
+    // Create a WAF Web ACL
+    const webAcl = new wafv2.CfnWebACL(this, 'LiteLLMWAF', {
+      defaultAction: { allow: {} },
+      scope: 'REGIONAL', // Must be REGIONAL for ALB
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: 'LiteLLMWebAcl',
+        sampledRequestsEnabled: true,
+      },
+      rules: [
+        {
+          name: 'AWS-AWSManagedRulesCommonRuleSet',
+          priority: 1,
+          overrideAction: { none: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesCommonRuleSet',
+              vendorName: 'AWS',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'LiteLLMCommonRuleSet',
+            sampledRequestsEnabled: true,
+          },
+        },
+        // You can add more rules or managed rule groups here
+      ],
+    });
+
+    // Associate the WAF Web ACL with your existing ALB
+    new wafv2.CfnWebACLAssociation(this, 'LiteLLMWAFALBAssociation', {
+      resourceArn: fargateService.loadBalancers[0].loadBalancerArn,
+      webAclArn: webAcl.attrArn,
     });
 
     dbSecurityGroup.addIngressRule(

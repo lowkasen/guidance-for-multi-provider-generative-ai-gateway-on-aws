@@ -15,6 +15,25 @@ It also provides additional features on top of LiteLLM such as an AWS Bedrock In
 1. Docker
 2. AWS CLI
 3. CDK
+4. yq (install with brew if on Mac, download binaries if on Linux (see `Installing yq` below))
+5. Make sure you have already run `cdk bootstrap` against the account and region you are deploying to.
+
+### Installing yq
+
+On Mac
+```
+brew install yq
+```
+
+On Linux
+```
+# Download the binary
+VERSION="v4.40.5"  # Replace with desired version
+BINARY="yq_linux_amd64"
+sudo wget https://github.com/mikefarah/yq/releases/download/${VERSION}/${BINARY} -O /usr/bin/yq
+# Make it executable
+sudo chmod +x /usr/bin/yq
+```
 
 ### Environment tested and confirmed
 
@@ -22,7 +41,22 @@ It also provides additional features on top of LiteLLM such as an AWS Bedrock In
 Docker: version 27.3.1
 AWS CLI: version 2.19.5
 CDK: 2.170.0
+yq: version 4.40.5
 ```
+
+### Deploying from AWS Cloud9 (Optional)
+
+If it's easier for you, you can deploy from an AWS Cloud9 environment using the following steps:
+
+1. Go to Cloud9 in the console
+2. Click `Create environment`
+3. Change `Instance Type` to `t3.small` (need to upgrade from micro for Docker to run effectively)
+4. Leave rest as default, and click `Create`
+5. Once, the environment is deployed, click `Open` under `Cloud9 IDE`
+6. In the terminal, run the following commands:
+7. `git clone https://github.com/aws-samples/genai-gateway.git`
+8. run `sudo ./install-cloud9-prerequisites.sh` (This will install `jq` for you and update you to the latest version of `cdk`. All other dependencies are pre-installed on Cloud9)
+9. Run the `Deployment Steps` described below
 
 ### Creating your certificate
 
@@ -44,10 +78,41 @@ CDK: 2.170.0
 3. In `.env`, set the `DOMAIN_NAME` to the sub domain you created in the `Creating your certificate` section of this README.
 4. In `.env`, Fill out any API Keys you need for any third party providers. If you only want to use Amazon Bedrock, you can just leave the `.env` file as-is
 5. By default, this solution is deployed with redis caching enabled, and with most popular model providers enabled. If you want to remove support for certain models, or add more models, you can create and edit your own `config/config.yaml` file. If not, the deployment will automatically use the `config/default-config.yaml`. Make sure you [enable model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html) on Amazon Bedrock.
-6. Run `./deploy.sh`
-7. After the deployment is done, you can visit the UI by going to the url at the stack output `LitellmCdkStack.ServiceURL`, which is the `DOMAIN_NAME` you configured earlier.
-8. The master api key is stored in AWS Secrets Manager in the `LiteLLMSecret` secret. This api key can be used to call the LiteLLM API, and is also the default password for the LiteLLM UI
+6. Make sure you have valid AWS credentials configured in your environment before running the next step
+7. Run `./deploy.sh`
+8. After the deployment is done, you can visit the UI by going to the url at the stack output `LitellmCdkStack.ServiceURL`, which is the `DOMAIN_NAME` you configured earlier.
+9. The master api key is stored in AWS Secrets Manager in the `LiteLLMSecret` secret. This api key can be used to call the LiteLLM API, and is also the default password for the LiteLLM UI
 
+#### Usage Instructions
+
+Using LiteLLM is practically Identical to using OpenAI, you just need to replace the baseurl and the api key with your LiteLLM ones
+
+```
+import openai # openai v1.0.0+
+client = openai.OpenAI(api_key="anything",base_url="https://<Your-Proxy-Endpoint>") # set proxy to base_url
+response = client.chat.completions.create(model="anthropic.claude-3-5-sonnet-20240620-v1:0", messages = [
+    {
+        "role": "user",
+        "content": "this is a test request, write a short poem"
+    }
+])
+
+print(response)
+```
+
+#### Compare Models
+
+If you would like to compare different models, you can use the `scripts/benchmark.py` script. To do so, do the following:
+
+1. `cd scripts`
+2. `python3 -m venv myenv`
+3. `source myenv/bin/activate`
+4. `pip3 install -r requirements.txt`
+5. `cp .env.template .env`
+6. Update the `.env` file with your litellm base url, and a valid litellm api key. Also change the list of model ids you would like to benchmark if needed.
+7. `benchmark.py` has a list of questions to use for the benchmark, at the top of the file. You can edit this list to try out different questions.
+8. run `python3 benchmark.py`
+9. The script will output the response from each model for each question, as well as the response time and the cost
 
 #### Config.yaml (all values pre-populated in Config.yaml, what they do, and what the default values are.)
 
@@ -374,22 +439,7 @@ So if you have traffic you want prioritized over all others, set those calls to 
 
 There is currently no way to set this priority on the server side. So you must handle this on the client side for now.
 
-#### Usage Instructions
 
-Using LiteLLM is practically Identical to using OpenAI, you just need to replace the baseurl and the api key with your LiteLLM ones
-
-```
-import openai # openai v1.0.0+
-client = openai.OpenAI(api_key="anything",base_url="https://<Your-Proxy-Endpoint>") # set proxy to base_url
-response = client.chat.completions.create(model="anthropic.claude-3-5-sonnet-20240620-v1:0", messages = [
-    {
-        "role": "user",
-        "content": "this is a test request, write a short poem"
-    }
-])
-
-print(response)
-```
 
 #### Bedrock interface
 
