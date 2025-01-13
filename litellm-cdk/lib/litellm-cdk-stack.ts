@@ -485,6 +485,9 @@ export class LitellmCdkStack extends cdk.Stack {
               excludedRules: [
                 {
                   name: 'NoUserAgent_HEADER'
+                },
+                {
+                  name: 'SizeRestrictions_BODY'
                 }
               ]
             },
