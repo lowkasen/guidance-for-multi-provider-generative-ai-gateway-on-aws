@@ -22,6 +22,20 @@ It also provides additional features on top of LiteLLM such as an AWS Bedrock In
 4. yq (install with brew if on Mac, download binaries if on Linux (see `Installing yq` below))
 5. Make sure you have already run `cdk bootstrap` against the account and region you are deploying to.
 
+If you have `DEPLOYMENT_PLATFORM` set to `EKS`:
+6. kubectl
+
+### Installing kubectl
+
+On Mac
+```
+brew install kubectl
+```
+
+On Linux
+ToDo
+
+
 ### Installing yq
 
 On Mac
@@ -80,12 +94,13 @@ If it's easier for you, you can deploy from an AWS Cloud9 environment using the 
 1. Run `cp .env.template .env`
 2. In `.env`, set the `CERTIFICATE_ARN` to the ARN of the certificate you created in the `Creating your certificate` section of this README.
 3. In `.env`, set the `DOMAIN_NAME` to the sub domain you created in the `Creating your certificate` section of this README.
-4. In `.env`, Fill out any API Keys you need for any third party providers. If you only want to use Amazon Bedrock, you can just leave the `.env` file as-is
-5. By default, this solution is deployed with redis caching enabled, and with most popular model providers enabled. If you want to remove support for certain models, or add more models, you can create and edit your own `config/config.yaml` file. If not, the deployment will automatically use the `config/default-config.yaml`. Make sure you [enable model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html) on Amazon Bedrock.
-6. Make sure you have valid AWS credentials configured in your environment before running the next step
-7. Run `./deploy.sh`
-8. After the deployment is done, you can visit the UI by going to the url at the stack output `LitellmCdkStack.ServiceURL`, which is the `DOMAIN_NAME` you configured earlier.
-9. The master api key is stored in AWS Secrets Manager in the `LiteLLMSecret` secret. This api key can be used to call the LiteLLM API, and is also the default password for the LiteLLM UI
+4. If you'd like to use EKS instead of ECS, switch `DEPLOYMENT_PLATFORM="ECS"` to `DEPLOYMENT_PLATFORM="EKS"` (Still in beta, probably has bugs.) (Note: you currently cannot freely switch between these. You must delete your existing deployment to switch deployment platforms.) (Also, deleting the stack when using EKS mode will fail because of EKS CDK issues. You will need to do some manual cleanup and some delete retries. We will try to find a fix for this soon.)
+5. In `.env`, Fill out any API Keys you need for any third party providers. If you only want to use Amazon Bedrock, you can just leave the `.env` file as-is
+6. By default, this solution is deployed with redis caching enabled, and with most popular model providers enabled. If you want to remove support for certain models, or add more models, you can create and edit your own `config/config.yaml` file. If not, the deployment will automatically use the `config/default-config.yaml`. Make sure you [enable model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html) on Amazon Bedrock.
+7. Make sure you have valid AWS credentials configured in your environment before running the next step
+8. Run `./deploy.sh`
+9. After the deployment is done, you can visit the UI by going to the url at the stack output `LitellmCdkStack.ServiceURL`, which is the `DOMAIN_NAME` you configured earlier.
+10. If you deployed to ECS, the master api key is stored in AWS Secrets Manager in the `LiteLLMSecret` secret. If you deployed to EKS, the master key will be in the stack output `LitellmCdkStack.MasterKey`. We will try to standardize this between the two modes soon. This api key can be used to call the LiteLLM API, and is also the default password for the LiteLLM UI.
 
 #### Usage Instructions
 
@@ -134,8 +149,6 @@ You can also use this to set default parameters for the model such as `temperatu
 You can also use this to override the default region for a model. For example, if you deploy the litellm to `us-east-1`, but want to use a AWS Bedrock model in `us-west-2`, you would set `aws_region_name` to `us-west-2`. The parameter to adjust the default region will vary by LLM Provider
 
 You can also use this to set a `weight` for an LLM to load balance between two different models with the same `model_name`
-
-For AWS Bedrock Models, you can also use this to specify a `guardrailConfig` to set a Guardrail for each model
 
 `litellm_settings`: These are additional settings for the litellm proxy
 
@@ -282,9 +295,12 @@ guardrails:
        mode: "during_call" # supported values: "pre_call", "post_call", "during_call"
        guardrailIdentifier: ff6ujrregl1q # your guardrail ID on bedrock
        guardrailVersion: "1"         # your guardrail version on bedrock
+       default_on: true # enforces the guardrail serverside for all models. Caller does not need to pass in the name of the guardrail for it to be enforced.
 ```
 
-To make use of the Guardrail, you must specifiy it's name in the client call. There is currently no way to globally enable a guardrail for all models. Example:
+If you set `default_on` to `true`, the guardrail will be enforced at all times. If you set it to false, enforcement is optional. 
+
+In the case that `default_on` is `false`, in order to make use of the Guardrail, you must specifiy it's name in the client call. Example:
 
 ```
 curl -X POST "https://<Your-Proxy-Endpoint>/user/new" \
@@ -301,22 +317,6 @@ curl -X POST "https://<Your-Proxy-Endpoint>/user/new" \
     "guardrails": ["bedrock-pre-guard"]
 }'
 ```
-
-If you would like to enable a Guardrail without having the client specify it, that is currently only possible with AWS Bedrock models. Instead of doing the above approach, you would do the following:
-
-```
-model_list:
-  #Bedrock Models
-  - model_name: anthropic.claude-3-5-sonnet-20240620-v1:0
-    litellm_params:
-      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
-      guardrailConfig: {
-        "guardrailIdentifier": "ff6ujrregl1q", # The identifier (ID) for the guardrail.
-        "guardrailVersion": "1",           # The version of the guardrail.
-      }
-```
-
-With this configuration, the guardrails will always be applied, and your client does not need to make any adjustments to their code.
 
 More details on guardrails here:
 https://docs.litellm.ai/docs/proxy/guardrails/bedrock
@@ -358,6 +358,8 @@ curl -X POST "https://<Your-Proxy-Endpoint>/user/new" \
 ```
 
 ##### Create user with a limit on TPM (Tokens Per Minute) and RPM (Requests Per Minute) and max parallel requests. In this case we give our user 10000 tokens per minute, and 10 requests per minute, and 2 parallel requests.
+Note: There is currently a bug where `max_parallel_requests` is not returned in the create user response. However, it is still taking effect, and you can confirm that by doing a GET on the user
+
 ```
 curl -X POST "https://<Your-Proxy-Endpoint>/user/new" \
 -H "Content-Type: application/json" \
@@ -384,15 +386,13 @@ curl -X POST "https://<Your-Proxy-Endpoint>/user/new" \
 ```
 
 
-##### Create a user that has separate Spends Budgets, TPM (Tokens Per Minute) limits, and RPM (Requests Per Minute) limits for different models 
+##### Create a user that has separate Spends TPM (Tokens Per Minute) limits and RPM (Requests Per Minute) limits for different models 
 
 In this case:
-for Claude 3.5 sonnet: 100 dollars per month, 10000 tokens per minute, and 5 requests per minute
-for Claude 3 haiku: 10 dollars per month, 20000 tokens per minute, and 10 requests per minute
+for Claude 3.5 sonnet: 10000 tokens per minute, and 5 requests per minute
+for Claude 3 haiku: 20000 tokens per minute, and 10 requests per minute
 
-Note: There is currently a bug where `model_max_budget`, `model_rpm_limit` and `model_tpm_limit` are not returned in the create user response. However, they are still taking effect, and you can confirm that by doing a GET on the user
-
-Note: `model_max_budget` has a duration of 28 days. This is not currently configurable
+Note: There is currently a bug where `model_rpm_limit` and `model_tpm_limit` are not returned in the create user response. However, they are still taking effect, and you can confirm that by doing a GET on the user
 
 ```
 curl -X POST "https://<Your-Proxy-Endpoint>/user/new" \
@@ -401,7 +401,6 @@ curl -X POST "https://<Your-Proxy-Endpoint>/user/new" \
 -d '{
      "user_email": "new_user@example.com",
      "user_role": "internal_user"
-     "model_max_budget":  {"anthropic.claude-3-5-sonnet-20240620-v1:0": 100, "anthropic.claude-3-haiku-20240307-v1:0": 10},
      "model_rpm_limit": {"anthropic.claude-3-5-sonnet-20240620-v1:0": 1, "anthropic.claude-3-haiku-20240307-v1:0": 1},
      "model_tpm_limit": {"anthropic.claude-3-5-sonnet-20240620-v1:0": 10000, "anthropic.claude-3-haiku-20240307-v1:0": 20000},
  }'
