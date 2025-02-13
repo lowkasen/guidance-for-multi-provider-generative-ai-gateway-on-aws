@@ -186,6 +186,16 @@ resource "kubernetes_deployment" "litellm" {
             value = var.region
           }
 
+          env {
+            name = "LITELLM_LOG"
+            value = "DEBUG"
+          }
+
+          env {
+            name = "LITELLM_LOCAL_MODEL_COST_MAP"
+            value = var.disable_outbound_network_access ? "True" : "False"
+          }
+
           env_from {
             secret_ref {
               name = kubernetes_secret.litellm_api_keys.metadata[0].name
@@ -471,7 +481,7 @@ resource "helm_release" "aws_load_balancer_controller" {
   repository = "https://aws.github.io/eks-charts"
   chart      = "aws-load-balancer-controller"
   namespace  = "kube-system"
-  version    = "1.7.1"
+  version    = "1.11.0"
 
   set {
     name  = "clusterName"
@@ -486,6 +496,30 @@ resource "helm_release" "aws_load_balancer_controller" {
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = module.aws_load_balancer_controller_irsa_role.iam_role_arn
+  }
+
+  //Only need to set to internal ECR repo when internet access not available
+  dynamic "set" {
+    for_each = var.disable_outbound_network_access ? [1] : []
+    content {
+      name  = "image.repository"
+      value = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com/${var.eks_alb_controller_private_ecr_repository_name}/eks/aws-load-balancer-controller"
+    }
+  }
+
+  set {
+    name  = "enableShield"
+    value = "false"
+  }
+
+  set {
+    name  = "enableWaf"
+    value = "false"
+  }
+
+  set {
+    name  = "enableWafv2"
+    value = "true"
   }
 
   depends_on = [
