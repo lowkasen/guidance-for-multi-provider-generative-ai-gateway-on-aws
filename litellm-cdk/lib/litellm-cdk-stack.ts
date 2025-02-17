@@ -70,8 +70,8 @@ interface LiteLLMStackProps extends cdk.StackProps {
   minCapacity: number;
   maxCapacity: number;
   cpuTargetUtilizationPercent: number;
-  memoryLimitMiB: number;
-  cpuUnits: number;
+  memoryTargetUtilizationPercent: number
+  vcpus: number;
 }
 
 class IngressAlias implements route53.IAliasRecordTarget {
@@ -281,12 +281,6 @@ export class LitellmCdkStack extends cdk.Stack {
     // ------------------------------------------------------------------------
     if (props.deploymentPlatform == DeploymentPlatform.EKS) {
 
-      new cdk.CfnOutput(this, 'VpcId', {
-        value: vpc.vpcId,
-        description: 'The ID of the VPC',
-        exportName: 'VpcId'
-      });
-
       new cdk.CfnOutput(this, 'ConfigBucketName', {
         value: configBucket.bucketName,
         description: 'The Name of the configuration bucket',
@@ -354,8 +348,9 @@ export class LitellmCdkStack extends cdk.Stack {
 
       // Create Task Definition
       const taskDefinition = new ecs.FargateTaskDefinition(this, 'LiteLLMTaskDef', {
-        memoryLimitMiB: props.memoryLimitMiB,
-        cpu: props.cpuUnits,
+        memoryLimitMiB: props.vcpus * 1024 * 2,
+        cpu: props.vcpus * 1024,
+
         runtimePlatform: {
           cpuArchitecture: props.architecture == "x86" ? ecs.CpuArchitecture.X86_64 : ecs.CpuArchitecture.ARM64,
           operatingSystemFamily: ecs.OperatingSystemFamily.LINUX
@@ -625,7 +620,9 @@ export class LitellmCdkStack extends cdk.Stack {
         targetUtilizationPercent: props.cpuTargetUtilizationPercent,
       });
 
-      
+      scaling.scaleOnMemoryUtilization('Memory', {
+        targetUtilizationPercent: props.memoryTargetUtilizationPercent,
+      });
 
       new cdk.CfnOutput(this, 'LitellmEcsCluster', {
         value: cluster.clusterName,
@@ -637,6 +634,12 @@ export class LitellmCdkStack extends cdk.Stack {
         description: 'Name of the task service'
       });
     }
+
+    new cdk.CfnOutput(this, 'VpcId', {
+      value: vpc.vpcId,
+      description: 'The ID of the VPC',
+      exportName: 'VpcId'
+    });
 
     new cdk.CfnOutput(this, 'ServiceURL', {
       value: `https://${props.domainName}`,
