@@ -1,17 +1,4 @@
-data "aws_caller_identity" "current" {}
-
-resource "aws_iam_role" "eks_developers" {
-  name               = "${var.name}-developers"
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
-}
-
-resource "aws_iam_role" "eks_operators" {
-  name               = "${var.name}-operators"
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
-}
-
 data "aws_iam_policy_document" "assume_role" {
-
   statement {
     sid     = "AssumeRole"
     actions = ["sts:AssumeRole"]
@@ -23,6 +10,16 @@ data "aws_iam_policy_document" "assume_role" {
   }
 }
 
+resource "aws_iam_role" "eks_developers" {
+  name               = "${var.name}-developers"
+  assume_role_policy = data.aws_iam_policy_document.assume_role.json
+}
+
+resource "aws_iam_role" "eks_operators" {
+  name               = "${var.name}-operators"
+  assume_role_policy = data.aws_iam_policy_document.assume_role.json
+}
+
 resource "aws_iam_role" "eks_nodegroup" {
   name = "${var.name}-eks-nodegroup-role"
 
@@ -30,7 +27,7 @@ resource "aws_iam_role" "eks_nodegroup" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
+        Effect    = "Allow"
         Principal = {
           Service = "ec2.amazonaws.com"
         }
@@ -40,6 +37,7 @@ resource "aws_iam_role" "eks_nodegroup" {
   })
 }
 
+# Attach AWS-managed policies
 resource "aws_iam_role_policy_attachment" "eks_nodegroup_worker_policy" {
   role       = aws_iam_role.eks_nodegroup.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
@@ -84,6 +82,7 @@ resource "aws_iam_policy_attachment" "nodegroup_ecr_ptc_attach" {
   roles      = [aws_iam_role.eks_nodegroup.name]
 }
 
+# Additional custom inline policy for the node group
 resource "aws_iam_role_policy" "node_additional_policies" {
   name = "${var.name}-eks-node-additional"
   role = aws_iam_role.eks_nodegroup.name
