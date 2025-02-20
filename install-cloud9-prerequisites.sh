@@ -35,16 +35,25 @@ else
     fi
 fi
 
-# Update CDK to latest version
-echo "Updating AWS CDK to latest version..."
-if command_exists npm; then
-    # Update globally installed CDK
-    npm update -g aws-cdk
+sudo yum update -y
 
-    # Verify the update
-    echo "CDK updated to version:"
-    cdk --version
-else
-    echo "npm is not installed. Cannot update CDK."
-    exit 1
-fi
+# Install required dependencies
+sudo yum install -y yum-utils unzip wget
+
+# Download the signing key
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --import -
+
+# Add the HashiCorp repository
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
+
+# Install Terraform
+sudo yum install -y terraform
+
+# Verify installation
+terraform version
+
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+kubectl version --client

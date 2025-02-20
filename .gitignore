@@ -37,3 +37,5 @@ terraform.tfstate.*
 **.env
 sessionmanager-bundle.zip
 sessionmanager-bundle
+backend.hcl
+resources.txt

@@ -4,7 +4,7 @@ Project ACTIVE as of Feb 15, 2025
 
 ## Project Overview
 
-This project provides a simple CDK deployment of LiteLLM into ECS on AWS. It aims to be pre-configured with defaults that will allow most users to quickly get started with LiteLLM.
+This project provides a simple Terraform deployment of LiteLLM into ECS or EKS on AWS. It aims to be pre-configured with defaults that will allow most users to quickly get started with LiteLLM.
 
 It also provides additional features on top of LiteLLM such as an AWS Bedrock Interface (instead of the default OpenAI interface), support for AWS Bedrock Managed Prompts, Chat History, and support for Okta Oauth 2.0 JWT Token Auth.
 
@@ -20,14 +20,12 @@ If you are unfamiliar with LiteLLM, it provides a consistent interface to access
 
 1. Docker
 2. AWS CLI
-3. CDK
+3. Terraform
 4. yq (install with brew if on Mac, download binaries if on Linux (see `Installing yq` below))
-5. Make sure you have already run `cdk bootstrap` against the account and region you are deploying to.
 
 If you have `DEPLOYMENT_PLATFORM` set to `EKS`:
 
-6. kubectl
-7. Terraform (needed because of limitations in the EKS CDK constructs. We hope to eventually unify the deployment in one IaC solution.)
+5. kubectl
 
 ### Installing kubectl
 
@@ -63,14 +61,13 @@ sudo chmod +x /usr/bin/yq
 ```
 Docker: version 27.3.1
 AWS CLI: version 2.19.5
-CDK: 2.170.0
 yq: version 4.40.5
 Terraform: v1.5.7
 kubectl Client Version: v1.32.1
 kubectl Kustomize Version: v5.5.0
 ```
 
-### Deploying from AWS Cloud9 (Optional) (Not tested with EKS)
+### Deploying from AWS Cloud9 (Optional)
 
 If it's easier for you, you can deploy from an AWS Cloud9 environment using the following steps:
 
@@ -81,7 +78,7 @@ If it's easier for you, you can deploy from an AWS Cloud9 environment using the 
 5. Once, the environment is deployed, click `Open` under `Cloud9 IDE`
 6. In the terminal, run the following commands:
 7. `git clone https://github.com/aws-samples/genai-gateway.git`
-8. run `sudo ./install-cloud9-prerequisites.sh` (This will install `jq` for you and update you to the latest version of `cdk`. All other dependencies are pre-installed on Cloud9)
+8. run `sudo ./install-cloud9-prerequisites.sh` (This will install `jq`, `terraform`, and `kubectl` for you. All other dependencies are pre-installed on Cloud9)
 9. Run the `Deployment Steps` described below
 
 ### Creating your certificate
@@ -100,26 +97,30 @@ If it's easier for you, you can deploy from an AWS Cloud9 environment using the 
 #### Deployment Steps
 
 1. Run `cp .env.template .env`
-2. In `.env`, set the `CERTIFICATE_ARN` to the ARN of the certificate you created in the `Creating your certificate` section of this README.
-3. In `.env`, set the `DOMAIN_NAME` to the sub domain you created in the `Creating your certificate` section of this README.
-4. In `.env`, set the `HOSTED_ZONE_NAME` to the hosted zone you created in the `Creating your certificate` section of this README.
-5. In `.env`, Fill out any API Keys you need for any third party providers. If you only want to use Amazon Bedrock, you can just leave the `.env` file as-is
-6. By default, this solution is deployed with redis caching enabled, and with most popular model providers enabled. If you want to remove support for certain models, or add more models, you can create and edit your own `config/config.yaml` file. If not, the deployment will automatically use the `config/default-config.yaml`. Make sure you [enable model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html) on Amazon Bedrock.
-7. Make sure you have valid AWS credentials configured in your environment before running the next step
-8. Run `./deploy.sh`
-9. After the deployment is done, you can visit the UI by going to the url at the stack output `LitellmCdkStack.ServiceURL`, which is the `DOMAIN_NAME` you configured earlier.
-10. If you deployed to ECS, the master api key is stored in AWS Secrets Manager in the `LiteLLMSecret` secret. If you deployed to EKS, the master key will be in the stack output `LitellmCdkStack.MasterKey`. We will try to standardize this between the two modes soon. This api key can be used to call the LiteLLM API, and is also the default password for the LiteLLM UI.
+2. In `.env`, set the `TERRAFORM_S3_BUCKET_NAME` to a globally unique bucket name. This will store your `.tfstate` files for your terraform deployment.
+3. In `.env`, set the `CERTIFICATE_ARN` to the ARN of the certificate you created in the `Creating your certificate` section of this README.
+4. In `.env`, set the `DOMAIN_NAME` to the sub domain you created in the `Creating your certificate` section of this README.
+5. In `.env`, set the `HOSTED_ZONE_NAME` to the hosted zone you created in the `Creating your certificate` section of this README.
+6. In `.env`, Fill out any API Keys you need for any third party providers. If you only want to use Amazon Bedrock, you can just leave the `.env` file as-is
+7. By default, this solution is deployed with redis caching enabled, and with most popular model providers enabled. If you want to remove support for certain models, or add more models, you can create and edit your own `config/config.yaml` file. If not, the deployment will automatically use the `config/default-config.yaml`. Make sure you [enable model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html) on Amazon Bedrock.
+8. Make sure you have valid AWS credentials configured in your environment before running the next step
+9. Run `./deploy.sh`
+10. After the deployment is done, you can visit the UI by going to the url at the stack output `ServiceURL`, which is the `DOMAIN_NAME` you configured earlier.
+11. The master api key is stored in AWS Secrets Manager in the `LiteLLMMasterSalt` secret. This api key can be used to call the LiteLLM API, and is also the default password for the LiteLLM UI.
 
 #### Optional Deployment Configurations
 
-* If you'd like to provide an existing VPC, set `EXISTING_VPC_ID` to your existing VPC. The VPC is expected to have both private and public subnets. The public subnets should have Auto-assign public IPv4 address set to yes. The VPC should also have at least one NAT Gateway. This has been tested with the following VPC specification in CDK
-```
-const vpc = new ec2.Vpc(this, 'LiteLLMVpcPreExisting', { maxAzs: 2, natGateways: 1 });
-```
+* If you'd like to provide an existing VPC, set `EXISTING_VPC_ID` to your existing VPC. The VPC is expected to have both private and public subnets. The public subnets should have Auto-assign public IPv4 address set to yes. The VPC should also have at least one NAT Gateway. This has been tested with the following VPC specification
 
-* If you'd like to use EKS instead of ECS, switch `DEPLOYMENT_PLATFORM="ECS"` to `DEPLOYMENT_PLATFORM="EKS"` (Still in beta, probably has bugs.) (Note: you currently cannot freely switch between these. You must delete your existing deployment to switch deployment platforms.)
+* 2 Availabillity Zones
+* 1 NAT Gateway
+* 1 Internet Gateway
+* 2 Public Subnets (Auto assigned public ips enabled, route table pointing to Internet Gateway)
+* 2 Private Subnets (Route table pointed to NAT Gateway)
 
-* If you'd like to bring your own EKS cluster, set `EXISTING_EKS_CLUSTER_NAME` to your EKS Cluster name. You must also set `EXISTING_VPC_ID`, and the VPC must be the vpc your EKS Cluster exists in. This has been tested with an new EKS cluster created with EKS Auto Mode disabled, and EKS ConfigMap enabled (see below image). It also has the following add-ons pre-installed:
+* If you'd like to use EKS instead of ECS, switch `DEPLOYMENT_PLATFORM="ECS"` to `DEPLOYMENT_PLATFORM="EKS"`
+
+* If you'd like to bring your own EKS cluster, set `EXISTING_EKS_CLUSTER_NAME` to your EKS Cluster name. You must also set `EXISTING_VPC_ID`, and the VPC must be the vpc your EKS Cluster exists in. This has been tested with an new EKS cluster created with EKS Auto Mode disabled, and EKS API Auth enabled (see below image). It also has the following add-ons pre-installed:
   * Amazon EKS Pod Identity Agent
   * Amazon VPC CNI
   * kube-proxy
@@ -127,7 +128,7 @@ const vpc = new ec2.Vpc(this, 'LiteLLMVpcPreExisting', { maxAzs: 2, natGateways:
 
 If you'd like the terraform to install the required add-ons for you, you can set `INSTALL_ADD_ONS_IN_EXISTING_EKS_CLUSTER="true"`
 
-If you're bringing an existing cluster, it is assumed that the role deploying this has access to the cluster.
+If you're bringing an existing cluster, it is assumed that the role or user deploying this has access to the cluster.
 
 Other configurations are not guaranteed to work. You may have to tweak the terraform yourself to work with your particular existing EKS cluster configuration.
 ![Verified EKS Cluster Configuration](./media/Tested-Bring-Your-Own-EKS-Cluster-Configuration.png)
