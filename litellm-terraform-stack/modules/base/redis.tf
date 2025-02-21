@@ -49,16 +49,17 @@ resource "aws_elasticache_replication_group" "redis" {
   description = "redis"
   engine                        = "redis"
   engine_version                = "7.1"
-  node_type = "cache.t3.micro"
-  num_cache_clusters = 2 
-  automatic_failover_enabled    = true   # automaticFailoverEnabled: true
+  node_type = var.redis_node_type
+  num_cache_clusters = var.redis_num_cache_clusters
+  automatic_failover_enabled    = true
   parameter_group_name = aws_elasticache_parameter_group.redis_parameter_group.name
   subnet_group_name             = aws_elasticache_subnet_group.redis_subnet_group.name
   security_group_ids            = [aws_security_group.redis_sg.id]
   port                          = 6379
+  multi_az_enabled = true
   at_rest_encryption_enabled    = true
-  transit_encryption_enabled    = false  # CDK code did not specify transit; set if needed
-
+  transit_encryption_enabled    = true
+  transit_encryption_mode      = "required"
   depends_on = [
     aws_elasticache_subnet_group.redis_subnet_group,
     aws_elasticache_parameter_group.redis_parameter_group
