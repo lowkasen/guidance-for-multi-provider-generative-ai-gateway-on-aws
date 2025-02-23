@@ -74,6 +74,7 @@ resource "aws_security_group_rule" "db_ingress" {
   protocol          = "tcp"
   cidr_blocks       = [data.aws_vpc.existing.cidr_block]
   security_group_id = data.aws_security_group.db.id
+  description              = "Allow EKS tasks to connect to RDS"
 }
 
 # Add ingress rules to Redis security group
@@ -84,6 +85,7 @@ resource "aws_security_group_rule" "redis_ingress" {
   protocol          = "tcp"
   cidr_blocks       = [data.aws_vpc.existing.cidr_block]
   security_group_id = data.aws_security_group.redis.id
+  description              = "Allow EKS tasks to connect to Redis"
 }
 
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
@@ -126,6 +128,13 @@ resource "aws_eks_cluster" "this" {
   version  = var.cluster_version
   role_arn = aws_iam_role.eks_cluster[0].arn
 
+  encryption_config {
+    provider {
+      key_arn = aws_kms_key.eks_secrets[0].arn
+    }
+    resources = ["secrets"]
+  }
+
   vpc_config {
     subnet_ids              = concat(data.aws_subnets.private.ids, data.aws_subnets.public.ids)
     endpoint_private_access = true
@@ -143,7 +152,8 @@ resource "aws_eks_cluster" "this" {
   # If your cluster IAM role or its policies are managed elsewhere,
   # you can add explicit depends_on to ensure they exist first:
   depends_on = [
-    aws_iam_role_policy_attachment.eks_cluster_policy
+    aws_iam_role_policy_attachment.eks_cluster_policy,
+    aws_iam_role_policy.eks_cluster_kms_policy
   ]
 }
 
@@ -218,6 +228,28 @@ resource "aws_eks_addon" "pod_identity_agent" {
   addon_name   = "eks-pod-identity-agent"
 
   depends_on = [aws_eks_cluster.this]
+}
+
+resource "aws_eks_addon" "cloudwatch_observability" {
+  count = var.create_cluster || var.install_add_ons_in_existing_eks_cluster ? 1 : 0
+
+  cluster_name = local.cluster_name
+  addon_name   = "amazon-cloudwatch-observability"
+
+  depends_on = [
+    aws_eks_cluster.this,
+    aws_eks_addon.pod_identity_agent,
+    aws_eks_pod_identity_association.cloudwatch_observability,
+    aws_eks_node_group.core_nodegroup,
+    helm_release.aws_load_balancer_controller
+  ]
+}
+
+resource "aws_eks_pod_identity_association" "cloudwatch_observability" {
+  cluster_name    = local.cluster_name
+  namespace       = "amazon-cloudwatch"
+  service_account = "cloudwatch-agent"
+  role_arn        = aws_iam_role.cw_observability_role[0].arn
 }
 
 

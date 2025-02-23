@@ -30,6 +30,7 @@ resource "aws_security_group" "db_sg" {
   vpc_id      = local.final_vpc_id
 
   egress {
+    description = "allow all outbound access"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -45,6 +46,24 @@ resource "aws_security_group" "db_sg" {
 resource "aws_db_subnet_group" "main" {
   name       = "${var.name}-db-subnet-group"
   subnet_ids = local.chosen_subnet_ids
+}
+
+resource "aws_db_parameter_group" "example_pg" {
+  name   = "rds-postgres-parameter-group"
+  # Update the family to match your PostgreSQL version
+  family = "postgres15"
+
+  # Enable logging of all statements
+  parameter {
+    name  = "log_statement"
+    value = "all"
+  }
+
+  # Log statements that take longer than 1ms
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "1"
+  }
 }
 
 # Database #1: litellm
@@ -64,4 +83,11 @@ resource "aws_db_instance" "database" {
   skip_final_snapshot       = true
   deletion_protection       = false
   multi_az = true
+  performance_insights_enabled = true
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+  auto_minor_version_upgrade = true
+  monitoring_interval = 60
+  monitoring_role_arn      = aws_iam_role.rds_enhanced_monitoring.arn
+  parameter_group_name = aws_db_parameter_group.example_pg.name
+  copy_tags_to_snapshot     = true
 }
