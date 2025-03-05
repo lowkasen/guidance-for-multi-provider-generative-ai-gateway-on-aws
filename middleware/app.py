@@ -916,13 +916,10 @@ async def proxy_request(request: Request):
             # History not enabled: start with empty
             chat_history = []
 
-        # Merge incoming system/user messages into chat_history in original order
-        # (We generally skip adding "assistant" messages from the request side,
-        #  because those come from the model, not from the user.)
+        # Merge incoming messages into chat_history in original order
         new_messages = data.get("messages", [])
         for msg in new_messages:
-            if msg["role"] in ["system", "user"]:
-                chat_history.append(msg)
+            chat_history.append(msg)
 
         # Now data["messages"] should be the entire conversation the model sees
         data["messages"] = chat_history
