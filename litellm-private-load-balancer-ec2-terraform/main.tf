@@ -11,7 +11,7 @@ data "aws_subnets" "public_subnets" {
     name   = "vpc-id"
     values = [var.vpc_id]
   }
-  
+
   filter {
     name   = "map-public-ip-on-launch"
     values = ["true"]
@@ -100,6 +100,11 @@ resource "aws_instance" "linux_instance" {
   key_name               = var.key_pair_name
   iam_instance_profile   = aws_iam_instance_profile.ec2_instance_profile.name
   associate_public_ip_address = true
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
 
   tags = {
     Name = "LinuxInstance"
