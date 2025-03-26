@@ -1,4 +1,3 @@
-
 #!/bin/bash
 set -aeuo pipefail
 
@@ -76,7 +75,7 @@ echo "deployed"
 if [ $? -eq 0 ]; then
     LITELLM_ECS_CLUSTER=$(terraform output -raw fake_server_ecs_cluster)
     LITELLM_ECS_TASK=$(terraform output -raw fake_server_ecs_task)
-    
+
     aws ecs update-service \
         --cluster $LITELLM_ECS_CLUSTER \
         --service $LITELLM_ECS_TASK \

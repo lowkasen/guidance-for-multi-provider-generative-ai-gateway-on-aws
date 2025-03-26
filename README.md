@@ -35,6 +35,7 @@ Project ACTIVE as of Feb 15, 2025
     - [Okta Oauth 2.0 JWT Token Auth Support](#okta-oauth-20-jwt-token-auth-support)
     - [Langsmith support](#langsmith-support)
     - [Setting up bastion host in your VPC to allow access to the private load balancer in the case you set PUBLIC_LOAD_BALANCER="false"](#setting-up-bastion-host-in-your-vpc-to-allow-access-to-the-private-load-balancer-in-the-case-you-set-public_load_balancerfalse)
+    - [Load testing](#load-testing)
 - [Open Source Library](#open-source-library)
 
 ## Project Overview
@@ -111,6 +112,8 @@ kubectl Kustomize Version: v5.5.0
 
 If it's easier for you, you can deploy from an AWS Cloud9 environment using the following steps:
 
+ℹ️ AWS Cloud9 is no longer available to new customers. Existing customers of AWS Cloud9 can continue to use the service as normal.
+
 1. Go to Cloud9 in the console
 2. Click `Create environment`
 3. Change `Instance Type` to `t3.small` (need to upgrade from micro for Docker to run effectively)
@@ -183,7 +186,7 @@ Other configurations are not guaranteed to work. You may have to tweak the terra
 
 * If you'd like to run LiteLLM in subnets without outbound internet access, set `DISABLE_OUTBOUND_NETWORK_ACCESS="true"`. Due to lack of internet access, this configuration will only work with AWS Bedrock or SageMaker models. Because of this, you must remove all non-Bedrock/non-SageMaker models from your `config/config.yaml` file. If you do not do this, LiteLLM will fail to start as it will attempt to call third party models over the internet.
 
-* If you'd like the Application Load Balancer to be private to your vpc, set `PUBLIC_LOAD_BALANCER="false"`. To make it more convinient to get access to this private load balancer, we have provided a script to deploy a windows EC2 instance in the same VPC, described in more detail in [Setting up bastion host in your VPC to allow access to the private load balancer in the case you set `PUBLIC_LOAD_BALANCER="false"` 
+* If you'd like the Application Load Balancer to be private to your vpc, set `PUBLIC_LOAD_BALANCER="false"`. To make it more convinient to get access to this private load balancer, we have provided a script to deploy a windows EC2 instance in the same VPC, described in more detail in [Setting up bastion host in your VPC to allow access to the private load balancer in the case you set `PUBLIC_LOAD_BALANCER="false"`
 ](#setting-up-bastion-host-in-your-vpc-to-allow-access-to-the-private-load-balancer-in-the-case-you-set-public_load_balancerfalse)
 
 
@@ -221,16 +224,18 @@ If you would like to compare different models, you can use the `scripts/benchmar
 
 #### Config.yaml (all values pre-populated in Config.yaml, what they do, and what the default values are.)
 
+ℹ️ To update this file without having to redeploy the whole stack, you can use the `update-litellm-config.sh` script.
+
 `model_list`: within this field, many different models are already configured for you. If you would like to add more models, or remove models, edit this field. Some model providers (such as Databricks and Azure OpenAI) will need you to add additional configuration to function, so they are commented out by default.
 
-`model_name`: this is the model's public name. You can set it to whatever you like. When someone is calling your model using the OpenAI client, they will use this value for the model id. By default, the `model_name` is set to the model id from each provider. 
+`model_name`: this is the model's public name. You can set it to whatever you like. When someone is calling your model using the OpenAI client, they will use this value for the model id. By default, the `model_name` is set to the model id from each provider.
 
 If a model id is used by two different providers, we instead used `<provider>/<model_id>` as the `model_name`. For example, the `github` provider shares a model id with the `groq` provider. So, to avoid the conflict, we use `github/llama-3.1-8b-instant` instead of just `llama-3.1-8b-instant`
 
 
-`litellm_params`: This is the full list of additional parameters sent to the model. For most models, this will only be `model` which is the model id used by the provider. Some providers such as `azure` need additional parameters, which are documented in `config/default-config.yaml`. 
+`litellm_params`: This is the full list of additional parameters sent to the model. For most models, this will only be `model` which is the model id used by the provider. Some providers such as `azure` need additional parameters, which are documented in `config/default-config.yaml`.
 
-You can also use this to set default parameters for the model such as `temperature` and `top_p`. 
+You can also use this to set default parameters for the model such as `temperature` and `top_p`.
 
 You can also use this to override the default region for a model. For example, if you deploy the litellm to `us-east-1`, but want to use a AWS Bedrock model in `us-west-2`, you would set `aws_region_name` to `us-west-2`. The parameter to adjust the default region will vary by LLM Provider
 
@@ -278,7 +283,7 @@ Example: Let's say you're using OpenAI, but you want to migrate to Anthropic Cla
       weight: 9
 - model_name: gpt-4o
     litellm_params:
-      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0 
+      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
       weight: 1
 ```
 
@@ -290,7 +295,7 @@ Example:
 model_list:
   - model_name: claude-3-5-sonnet-20240620-v1:0
     litellm_params:
-      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0 
+      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
   - model_name: claude-3-5-sonnet-20240620-v1:0
     litellm_params:
       model: bedrock/anthropic.claude-3-haiku-20240307-v1:0
@@ -315,7 +320,7 @@ model_list:
     tpm: 100000
     rpm: 1000
     litellm_params:
-      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0 
+      model: bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0
   - model_name: claude-3-5-sonnet-20240620-v1:0
     tpm: 200000
     rpm: 2000
@@ -384,7 +389,7 @@ guardrails:
        default_on: true # enforces the guardrail serverside for all models. Caller does not need to pass in the name of the guardrail for it to be enforced.
 ```
 
-If you set `default_on` to `true`, the guardrail will be enforced at all times. If you set it to false, enforcement is optional. 
+If you set `default_on` to `true`, the guardrail will be enforced at all times. If you set it to false, enforcement is optional.
 
 In the case that `default_on` is `false`, in order to make use of the Guardrail, you must specifiy it's name in the client call. Example:
 
@@ -475,7 +480,7 @@ curl -X POST "$GATEWAY_URL/user/new" \
 ```
 
 
-##### Create a user that has separate Spends TPM (Tokens Per Minute) limits and RPM (Requests Per Minute) limits for different models 
+##### Create a user that has separate Spends TPM (Tokens Per Minute) limits and RPM (Requests Per Minute) limits for different models
 
 In this case:
 for Claude 3.5 sonnet: 10000 tokens per minute, and 5 requests per minute
@@ -622,7 +627,7 @@ The middleware layer also has support for Bedrock Managed Prompts. It works the 
 
 You can use a managed prompt like this:
 ```
-model_id = "arn:aws:bedrock:us-west-2:235614385815:prompt/6LE1KDKISG" #Put the arn of your prompt as the model_id
+model_id = "arn:aws:bedrock:us-west-2:123456789012:prompt/6LE1KDKISG" #Put the arn of your prompt as the model_id
 response = client.converse(
     modelId=model_id,
     promptVariables={ #specify any variables you need for your prompt
@@ -635,7 +640,7 @@ The OpenAI Interface also has support for Bedrock Manage Prompts.
 You can use a managed prompt like this:
 
 ```
-model = "arn:aws:bedrock:us-west-2:235614385815:prompt/6LE1KDKISG:2" #Put the arn of your prompt as the model_id
+model = "arn:aws:bedrock:us-west-2:123456789012:prompt/6LE1KDKISG:2" #Put the arn of your prompt as the model_id
 
 response = client.chat.completions.create(
     model=model,
@@ -691,7 +696,7 @@ for chunk in stream:
     if first_chunk:
         session_id = getattr(chunk, "session_id", None)
         first_chunk = False
-    
+
     #Do normal processing on all chunks
 
 stream2 = client.chat.completions.create(
@@ -803,7 +808,7 @@ Once you have configured your Okta settings, you can create a user like this:
 
 Request
 ```
-export OKTA_JWT=<Your-Okta-Oauth-2.0-JWT> 
+export OKTA_JWT=<Your-Okta-Oauth-2.0-JWT>
 
 curl -X POST "$GATEWAY_URL/user/new" \
 -H "Content-Type: application/json" \
@@ -832,14 +837,14 @@ curl -X POST "$GATEWAY_URL/key/generate" \
 
 Reponse
 ```
-{"key_alias":null,"duration":null,"models":[],"spend":0.0,"max_budget":null,"user_id":"testuser@mycompany.com","team_id":null,"max_parallel_requests":null,"metadata":{},"tpm_limit":null,"rpm_limit":null,"budget_duration":null,"allowed_cache_controls":[],"soft_budget":null,"config":{},"permissions":{},"model_max_budget":{},"send_invite_email":null,"model_rpm_limit":null,"model_tpm_limit":null,"guardrails":null,"blocked":null,"aliases":{},"key":"<Second_Api_Key_Tied_To_Okta_User>","key_name":"sk-...fbcg","expires":null,"token_id":"8bb9cb70ce3ed3b7907dfbaae525e06a2fec6601dbe930b5571c0aca12552378"}     
+{"key_alias":null,"duration":null,"models":[],"spend":0.0,"max_budget":null,"user_id":"testuser@mycompany.com","team_id":null,"max_parallel_requests":null,"metadata":{},"tpm_limit":null,"rpm_limit":null,"budget_duration":null,"allowed_cache_controls":[],"soft_budget":null,"config":{},"permissions":{},"model_max_budget":{},"send_invite_email":null,"model_rpm_limit":null,"model_tpm_limit":null,"guardrails":null,"blocked":null,"aliases":{},"key":"<Second_Api_Key_Tied_To_Okta_User>","key_name":"sk-...fbcg","expires":null,"token_id":"8bb9cb70ce3ed3b7907dfbaae525e06a2fec6601dbe930b5571c0aca12552378"}
 ```
 
 #### Langsmith support
 
 To use langsmith, provide your LANGSMITH_API_KEY, LANGSMITH_PROJECT, and LANGSMITH_DEFAULT_RUN_NAME in your .env file
 
-#### Setting up bastion host in your VPC to allow access to the private load balancer in the case you set `PUBLIC_LOAD_BALANCER="false"` 
+#### Setting up bastion host in your VPC to allow access to the private load balancer in the case you set `PUBLIC_LOAD_BALANCER="false"`
 
 1. Create a EC2 Key Pair ([Documentation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/create-key-pairs.html))
 2. In `.env`, set `EC2_KEY_PAIR_NAME` to your key pair name
@@ -851,8 +856,36 @@ To use langsmith, provide your LANGSMITH_API_KEY, LANGSMITH_PROJECT, and LANGSMI
         * Original: `127.0.0.1 localhost`
         * Modified: `127.0.0.1 localhost <RECORD_NAME specified in .env file>` e.g. `127.0.0.1 localhost genai-gateway.robert.people.aws.dev`
 6. Set up an ssh tunnel `ssh -i <your_pem_file.pem> -L 8443:<RECORD_NAME>:443 ec2-user@<bastion_host_public_ip>`
-7. Now open a browser and navigate it to `https://<RECORD_NAME>:8443` 
+7. Now open a browser and navigate it to `https://<RECORD_NAME>:8443`
 8. If all has gone well, you should see the LiteLLM UI
+
+
+#### Load testing
+
+To assist with load testing, a mock LLM backend can be deployed by the `create-fake-llm-load-testing-server.sh` script.
+
+Configuration is done via the `.env` file, via variables:
+
+```
+FAKE_LLM_LOAD_TESTING_ENDPOINT_CERTIFICATE_ARN
+FAKE_LLM_LOAD_TESTING_ENDPOINT_HOSTED_ZONE_NAME
+FAKE_LLM_LOAD_TESTING_ENDPOINT_RECORD_NAME
+```
+
+Procedure for these settings is similar to the one described in the [Deployment steps](#deployment-steps), but you need to use a different name for the record and different certificate, the hosted zone can be reused.
+
+This will deploy a simple HTTP backend that exposes 3 APIs for use via HTTP POST:
+* `/model/{model_id}/converse`
+
+   Returns a single JSON response according to the Bedrock response schema. The model_id is ignored.
+* `/chat/completions`
+* `/v1/chat/completions`
+
+  The 2 completion endpoints either return:
+  - A normal (non-streaming) completion with a random 1–3 second delay
+  - A streaming response with multiple chunks and random 0.2–0.8 second delays
+
+To cleanup the mock LLM backend, run `delete-fake-llm-load-testing-server.sh`.
 
 ## Open Source Library
 
