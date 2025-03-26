@@ -754,6 +754,8 @@ async def get_chat_stream(
     using aiohttp, and also returns the upstream headers in the response.
     """
 
+    # Semgrep incorrectly marks this method as unused
+    # nosemgrep
     async def read_linewise(aiohttp_body, chunk_size=1024):
         """
         Reads raw chunks from the aiohttp response body and yields complete lines.
