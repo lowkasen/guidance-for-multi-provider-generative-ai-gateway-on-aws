@@ -173,7 +173,7 @@ For detailed cost estimates for deployment on EKS platform, it is recommended to
 
 When you build systems on AWS infrastructure, security responsibilities are shared between you and AWS. This [shared responsibility model](https://aws.amazon.com/compliance/shared-responsibility-model/) reduces your operational burden because AWS operates, manages, and controls the components including the host operating system, the virtualization layer, and the physical security of the facilities in which the services operate. For more information about AWS security, visit [AWS Cloud Security](http://aws.amazon.com/security/).
 
-This guidance implements several security best practices and AWS services to enhance the security posture of your ECS or EKS Clusters. Here are the key security components and considerations:
+This guidance implements several security best practices and AWS services to enhance the security posture of your ECS and EKS Clusters. Here are the key security components and considerations:
 
 ### Identity and Access Management (IAM)
 
@@ -251,14 +251,11 @@ Make sure you have sufficient quota for each of the services implemented in this
 quotas](https://docs.aws.amazon.com/general/latest/gr/aws_service_limits.html).
 
 To view the service quotas for all AWS services in the documentation without switching pages, view the information in the [Service endpoints and
-quotas](https://docs.aws.amazon.com/general/latest/gr/aws-general.pdf#aws-service-information) page in the PDF instead.
+quotas](https://docs.aws.amazon.com/general/latest/gr/aws-general.pdf#aws-service-information) page in the PDF format instead.
 
 ## How to deploy
 
-Please see detailed Guidance deployment and usage instructions in the Implementation Guide [here](https://implementationguides.kits.eventoutfitters.aws.dev/rgai-proxy-0130/ai-ml/running-generative-ai-gateway-proxy.html)
-
-**TO DO: UPDATE TO LIVE IG URL ABOVE ONCE AVAILABLE!**
-
+Please find detailed guidance deployment and usage instructions in the Implementation Guide [here](https://aws-solutions-library-samples.github.io/ai-ml/guidance-for-multi-provider-generative-ai-gateway-on-aws.html )
 
 ## Open Source Library
 
