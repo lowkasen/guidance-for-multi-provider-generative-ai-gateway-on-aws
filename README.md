@@ -259,7 +259,7 @@ Please find detailed guidance deployment and usage instructions in the Implement
 
 ## Workshop
 
-Follow the step-by-step instructions provided in this [workshop](https://catalog.us-east-1.prod.workshops.aws/workshops/db0f23ea-2442-4962-9a54-04dcdab7de59/en-US) to implement the guidance. 
+Follow the step-by-step instructions provided in this [workshop](https://catalog.us-east-1.prod.workshops.aws/workshops/db0f23ea-2442-4962-9a54-04dcdab7de59/en-US) for a deep dive hands-on experience.
 
 
 ## Open Source Library
