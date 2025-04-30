@@ -46,7 +46,6 @@ if [ ! -f ".env" ]; then
     cp .env.template .env
 fi
 
-
 SKIP_BUILD=false
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -66,9 +65,43 @@ APP_NAME=litellm
 MIDDLEWARE_APP_NAME=middleware
 LOG_BUCKET_STACK_NAME="log-bucket-stack"
 MAIN_STACK_NAME="litellm-stack"
-
+TRACKING_STACK_NAME="tracking-stack"
 # Load environment variables from .env file
 source .env
+
+# Auto-detect existing deployments and set defaults for backward compatibility
+if aws cloudformation describe-stacks --stack-name "${TRACKING_STACK_NAME}" &>/dev/null; then
+  echo "Detected existing deployment - ensuring backward compatibility"
+  # If variables aren't explicitly set in .env, use existing configuration
+  if [ -z "$USE_ROUTE53" ]; then
+    # For existing deployments where HOSTED_ZONE_NAME is set, maintain Route53 usage
+    if [ -n "$HOSTED_ZONE_NAME" ] && [ -n "$RECORD_NAME" ]; then
+      USE_ROUTE53="true"
+      echo "→ Setting USE_ROUTE53=true to maintain existing configuration"
+    else
+      USE_ROUTE53="false"
+    fi
+  fi
+else
+  echo "New deployment detected - using new defaults"
+  # For new deployments, set defaults if not explicitly defined
+  if [ -z "$USE_ROUTE53" ]; then
+    USE_ROUTE53="false"
+    echo "→ Setting USE_ROUTE53=false (default for new deployments)"
+  fi
+fi
+
+# Use CloudFront by default if not explicitly set
+if [ -z "$USE_CLOUDFRONT" ]; then
+  USE_CLOUDFRONT="true"
+  echo "→ Setting USE_CLOUDFRONT=true (default)"
+fi
+
+# Set CloudFront price class if not defined
+if [ -z "$CLOUDFRONT_PRICE_CLASS" ]; then
+  CLOUDFRONT_PRICE_CLASS="PriceClass_100"
+  echo "→ Setting CLOUDFRONT_PRICE_CLASS=${CLOUDFRONT_PRICE_CLASS} (default)"
+fi
 
 # Check if bucket exists
 if aws s3api head-bucket --bucket "$TERRAFORM_S3_BUCKET_NAME" 2>/dev/null; then
@@ -84,9 +117,21 @@ if [[ (-z "$LITELLM_VERSION") || ("$LITELLM_VERSION" == "placeholder") ]]; then
     exit 1
 fi
 
-if [ -z "$CERTIFICATE_ARN" ] || [ -z "$RECORD_NAME" ]; then
-    echo "Error: CERTIFICATE_ARN and RECORD_NAME must be set in .env file"
-    exit 1
+# Update validation logic
+if [ "$USE_ROUTE53" = "true" ]; then
+    if [ -z "$HOSTED_ZONE_NAME" ] || [ -z "$RECORD_NAME" ]; then
+        echo "Error: When USE_ROUTE53=true, both HOSTED_ZONE_NAME and RECORD_NAME must be set in .env file"
+        exit 1
+    fi
+    
+    if [ -z "$CERTIFICATE_ARN" ]; then
+        echo "Warning: No CERTIFICATE_ARN provided. Using CloudFront-to-ALB HTTP communication with header authentication."
+        echo "Note: Communication between users and CloudFront will still use HTTPS."
+    fi
+else
+    if [ -n "$HOSTED_ZONE_NAME" ] || [ -n "$RECORD_NAME" ]; then
+        echo "Warning: HOSTED_ZONE_NAME and/or RECORD_NAME are set but will not be used because USE_ROUTE53=false"
+    fi
 fi
 
 echo "Certificate Arn: " $CERTIFICATE_ARN
@@ -325,6 +370,14 @@ export TF_VAR_disable_swagger_page=$DISABLE_SWAGGER_PAGE
 export TF_VAR_disable_admin_ui=$DISABLE_ADMIN_UI
 export TF_VAR_langfuse_public_key=$LANGFUSE_PUBLIC_KEY
 export TF_VAR_langfuse_secret_key=$LANGFUSE_SECRET_KEY
+export TF_VAR_use_route53=$USE_ROUTE53
+export TF_VAR_use_cloudfront=$USE_CLOUDFRONT
+export TF_VAR_cloudfront_price_class=$CLOUDFRONT_PRICE_CLASS
+
+# Display CloudFront and Route53 configuration
+echo "USE_ROUTE53: $USE_ROUTE53"
+echo "USE_CLOUDFRONT: $USE_CLOUDFRONT"
+echo "CLOUDFRONT_PRICE_CLASS: $CLOUDFRONT_PRICE_CLASS"
 
 if [ -n "${LANGFUSE_HOST}" ]; then
     export TF_VAR_langfuse_host=$LANGFUSE_HOST
@@ -355,7 +408,6 @@ if [ $? -eq 0 ]; then
     echo "Deployment successful. Extracting outputs..."
     
     if [ "$DEPLOYMENT_PLATFORM" = "ECS" ]; then
-
         LITELLM_ECS_CLUSTER=$(terraform output -raw LitellmEcsCluster)
         LITELLM_ECS_TASK=$(terraform output -raw LitellmEcsTask)
         SERVICE_URL=$(terraform output -raw ServiceURL)
@@ -378,6 +430,30 @@ if [ $? -eq 0 ]; then
         aws eks update-kubeconfig --region $aws_region --name $EKS_CLUSTER_NAME
         kubectl rollout restart deployment $EKS_DEPLOYMENT_NAME
     fi
+    
+    # Validate CloudFront if enabled
+    if [ "$USE_CLOUDFRONT" = "true" ]; then
+        echo "Validating CloudFront deployment..."
+        CF_DIST_ID=$(terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
+        if [ -n "$CF_DIST_ID" ]; then
+            echo "✓ CloudFront distribution created successfully: $CF_DIST_ID"
+            CF_DOMAIN=$(terraform output -raw cloudfront_domain_name 2>/dev/null || echo "")
+            echo "✓ CloudFront domain: $CF_DOMAIN"
+            echo "CloudFrontDomain=$CF_DOMAIN" >> resources.txt
+            echo "CloudFrontID=$CF_DIST_ID" >> resources.txt
+            
+            echo "Note: CloudFront distribution deployment may take 15-30 minutes to complete globally"
+        else
+            echo "⚠️ CloudFront distribution ID not found in outputs - this is expected if CloudFront module was not applied"
+        fi
+    fi
+
+    # Validate Route53 if used
+    if [ "$USE_ROUTE53" = "true" ]; then
+        echo "✓ Route53 configuration applied successfully"
+    fi
+    
+    echo "✓ Deployment completed successfully"
 else
     echo "Deployment failed"
 fi

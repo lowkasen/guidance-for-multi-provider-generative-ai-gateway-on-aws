@@ -28,10 +28,10 @@ if [[ (-z "$LITELLM_VERSION") || ("$LITELLM_VERSION" == "placeholder") ]]; then
     exit 1
 fi
 
-if [ -z "$CERTIFICATE_ARN" ] || [ -z "$RECORD_NAME" ]; then
-    echo "Error: CERTIFICATE_ARN and RECORD_NAME must be set in .env file"
-    exit 1
-fi
+# if [ -z "$CERTIFICATE_ARN" ] || [ -z "$RECORD_NAME" ]; then
+#     echo "Error: CERTIFICATE_ARN and RECORD_NAME must be set in .env file"
+#     exit 1
+# fi
 
 echo "Certificate Arn: " $CERTIFICATE_ARN
 echo "RECORD_NAME: " $RECORD_NAME

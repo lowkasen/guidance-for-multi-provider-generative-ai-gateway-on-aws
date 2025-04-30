@@ -182,19 +182,44 @@ variable "okta_issuer" {
   type        = string
 }
 
-variable "certificate_arn" {
-  description = "ARN of the ACM certificate"
+variable "use_route53" {
+  description = "Whether to use Route53 for DNS management. If false, no Route53 resources will be created."
+  type        = bool
+  default     = false
+}
+
+variable "use_cloudfront" {
+  description = "Whether to use CloudFront for content distribution. If false, only ALB will be used."
+  type        = bool
+  default     = true
+}
+
+variable "cloudfront_price_class" {
+  description = "The price class for CloudFront distribution"
   type        = string
+  default     = "PriceClass_100"
+  validation {
+    condition     = contains(["PriceClass_100", "PriceClass_200", "PriceClass_All"], var.cloudfront_price_class)
+    error_message = "Price class must be one of PriceClass_100, PriceClass_200, or PriceClass_All."
+  }
+}
+
+variable "certificate_arn" {
+  description = "ARN of the ACM certificate. Required if use_route53 is true."
+  type        = string
+  default     = ""
 }
 
 variable "record_name" {
-  description = "record name for the ingress"
+  description = "Record name for the ingress. Required if use_route53 is true."
   type        = string
+  default     = ""
 }
 
 variable "hosted_zone_name" {
-  description = "Hosted zone name for the ingress"
+  description = "Hosted zone name for the ingress. Required if use_route53 is true."
   type        = string
+  default     = ""
 }
 
 variable "create_private_hosted_zone_in_existing_vpc" {
