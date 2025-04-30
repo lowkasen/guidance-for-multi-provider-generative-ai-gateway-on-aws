@@ -28,7 +28,7 @@ If you are unfamiliar with LiteLLM, it provides a consistent interface to access
 
 ## Architecture
 
-![Reference Architecture Diagram ECS EKS](./media/Reference_architecture_ECS_EKS_platform_combined.jpg)
+![Reference Architecture Diagram ECS EKS](./media/architecture.png)
 
 ### Architecture steps
 
