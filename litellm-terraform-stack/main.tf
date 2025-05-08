@@ -6,7 +6,7 @@ resource "aws_cloudformation_stack" "guidance_deployment_metrics" {
     template_body = <<STACK
     {
         "AWSTemplateFormatVersion": "2010-09-09",
-        "Description": "Guidance for Running Generative AI Gateway Proxy on AWS. The Solution ID is SO9022 and the Solution Version is 1.0.0",
+        "Description": "Guidance for Running Generative AI Gateway Proxy on AWS. The Solution ID is SO9022 and the Solution Version is 1.1.0",
         "Resources": {
             "EmptyResource": {
                 "Type": "AWS::CloudFormation::WaitConditionHandle"
@@ -32,6 +32,7 @@ module "base" {
   rds_allocated_storage = var.rds_allocated_storage
   redis_node_type = var.redis_node_type
   redis_num_cache_clusters = var.redis_num_cache_clusters
+  use_route53 = var.use_route53
 }
 
 module "ecs_cluster" {
@@ -47,6 +48,9 @@ module "ecs_cluster" {
   ecr_middleware_repository_url = module.base.MiddlewareRepositoryUrl
   litellm_version = var.litellm_version
   config_bucket_name = module.base.ConfigBucketName
+  use_route53 = var.use_route53
+  use_cloudfront = var.use_cloudfront
+  cloudfront_price_class = var.cloudfront_price_class
   openai_api_key = var.openai_api_key
   azure_openai_api_key = var.azure_openai_api_key
   azure_api_key = var.azure_api_key

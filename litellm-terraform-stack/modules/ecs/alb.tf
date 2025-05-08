@@ -18,18 +18,68 @@ resource "aws_lb" "this" {
    }
 }
 
+# HTTP Listener for CloudFront origin connection
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.this.arn
+  port              = 80
+  protocol          = "HTTP"
+  
+  # Use tg_4000 as the default
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_4000.arn
+  }
+}
+
 # HTTPS Listener
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.this.arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = var.certificate_arn
+  
+  # Use ACM certificate if provided, otherwise use self-signed certificate
+  certificate_arn   = var.certificate_arn != "" ? var.certificate_arn : aws_acm_certificate.self_signed[0].arn
 
   # Instead of a fixed-response 404, use tg_4000 as the default.
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.tg_4000.arn
+  }
+}
+
+# Create a self-signed certificate if no certificate ARN is provided
+resource "tls_private_key" "self_signed" {
+  count     = var.certificate_arn == "" ? 1 : 0
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_self_signed_cert" "self_signed" {
+  count           = var.certificate_arn == "" ? 1 : 0
+  private_key_pem = tls_private_key.self_signed[0].private_key_pem
+
+  subject {
+    common_name  = "litellm-gateway.local"
+    organization = "LiteLLM Gateway"
+  }
+
+  validity_period_hours = 8760 # 1 year
+
+  allowed_uses = [
+    "key_encipherment",
+    "digital_signature",
+    "server_auth",
+  ]
+}
+
+resource "aws_acm_certificate" "self_signed" {
+  count            = var.certificate_arn == "" ? 1 : 0
+  private_key      = tls_private_key.self_signed[0].private_key_pem
+  certificate_body = tls_self_signed_cert.self_signed[0].cert_pem
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -71,6 +121,77 @@ resource "aws_lb_target_group" "tg_3000" {
   }
 }
 
+# Health check exception rule - highest priority
+# Allows CloudFront to perform health checks without requiring the authentication header
+resource "aws_lb_listener_rule" "health_check_exception" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 4  # Highest priority we can safely use
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_4000.arn
+  }
+
+  # Explicit health check paths - avoid wildcards for clarity
+  condition {
+    path_pattern {
+      values = [
+        "/",                         # Root path
+        "/health",                   # Base health endpoint
+        "/health/liveliness",        # Specific health endpoint
+        "/bedrock/health/liveliness" # Middleware health endpoint
+      ]
+    }
+  }
+}
+
+# CloudFront authentication rule - accepts traffic with the secret header
+# This provides an additional security layer to prevent direct ALB access
+resource "aws_lb_listener_rule" "cloudfront_auth" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 5  # Second priority, after health checks
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_4000.arn
+  }
+
+  # Check for the CloudFront secret header
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# Reject requests without CloudFront header when CloudFront is enabled
+# This is the last line of defense for non-health-check paths
+resource "aws_lb_listener_rule" "reject_direct_access" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 6  # Third priority
+
+  action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "application/json"
+      message_body = "{\"error\": \"Access denied. Direct access to this endpoint is not allowed.\"}"
+      status_code  = "403"
+    }
+  }
+
+  # Match all paths - since higher priority rules will handle exceptions
+  condition {
+    path_pattern {
+      values = ["/*"]
+    }
+  }
+}
+
+# Default catch-all rule for forwarding traffic when CloudFront is not enabled
 resource "aws_lb_listener_rule" "catch_all" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 99
@@ -292,6 +413,392 @@ resource "aws_lb_listener_rule" "user_new" {
   condition {
     http_request_method {
       values = ["POST", "GET", "PUT"]
+    }
+  }
+}
+
+# HTTP Listener Rules for CloudFront to ALB communication
+# ---------------------------------------------------------------------------
+
+# Health check exception rule for HTTP - highest priority
+resource "aws_lb_listener_rule" "health_check_exception_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 4  # Highest priority we can safely use
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_4000.arn
+  }
+
+  # Explicit health check paths - avoid wildcards for clarity
+  condition {
+    path_pattern {
+      values = [
+        "/",                         # Root path
+        "/health",                   # Base health endpoint
+        "/health/liveliness",        # Specific health endpoint
+        "/bedrock/health/liveliness" # Middleware health endpoint
+      ]
+    }
+  }
+}
+
+# CloudFront authentication rule for HTTP
+resource "aws_lb_listener_rule" "cloudfront_auth_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 5  # Second priority, after health checks
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_4000.arn
+  }
+
+  # Check for the CloudFront secret header
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# Duplicate all path-specific rules for the HTTP listener with header authentication
+
+# bedrock model for HTTP
+resource "aws_lb_listener_rule" "bedrock_models_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 16
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/bedrock/model/*"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# OpenAICompletions for HTTP
+resource "aws_lb_listener_rule" "openai_completions_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 15
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/v1/chat/completions"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# ChatCompletions for HTTP
+resource "aws_lb_listener_rule" "chat_completions_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 14
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/chat/completions"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# ChatHistory for HTTP
+resource "aws_lb_listener_rule" "chat_history_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 8
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/chat-history"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# BedrockChatHistory for HTTP
+resource "aws_lb_listener_rule" "bedrock_chat_history_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 9
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/bedrock/chat-history"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# BedrockLiveliness for HTTP
+resource "aws_lb_listener_rule" "bedrock_liveliness_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/bedrock/health/liveliness"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# SessionIds for HTTP
+resource "aws_lb_listener_rule" "session_ids_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 11
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/session-ids"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# KeyGenerate for HTTP
+resource "aws_lb_listener_rule" "key_generate_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 12
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/key/generate"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# UserNew for HTTP
+resource "aws_lb_listener_rule" "user_new_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 13
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_3000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/user/new"]
+    }
+  }
+
+  condition {
+    http_request_method {
+      values = ["POST", "GET", "PUT"]
+    }
+  }
+
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# DEFAULT CATCH-ALL with CloudFront header for HTTP
+resource "aws_lb_listener_rule" "catch_all_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 98
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg_4000.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/*"]
+    }
+  }
+  
+  # Add CloudFront Secret header validation
+  condition {
+    http_header {
+      http_header_name = "X-CloudFront-Secret"
+      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
+    }
+  }
+}
+
+# Reject requests without CloudFront header - LAST PRIORITY
+resource "aws_lb_listener_rule" "reject_direct_access_http" {
+  count        = var.use_cloudfront ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 99  # Make sure this is the last priority
+
+  action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "application/json"
+      message_body = "{\"error\": \"Access denied. Direct access to this endpoint is not allowed.\"}"
+      status_code  = "403"
+    }
+  }
+
+  # Match all paths - since higher priority rules will handle exceptions
+  condition {
+    path_pattern {
+      values = ["/*"]
     }
   }
 }

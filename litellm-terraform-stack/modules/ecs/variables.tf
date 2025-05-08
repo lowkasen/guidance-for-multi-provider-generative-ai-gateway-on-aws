@@ -199,6 +199,7 @@ variable "okta_issuer" {
 variable "certificate_arn" {
   description = "ARN of the ACM certificate"
   type        = string
+  default     = ""
 }
 
 variable "wafv2_acl_arn" {
@@ -209,11 +210,31 @@ variable "wafv2_acl_arn" {
 variable "record_name" {
   description = "Record name for the ingress"
   type        = string
+  default     = ""
 }
 
 variable "hosted_zone_name" {
   description = "Hosted zone name for the ingress"
   type        = string
+  default     = ""
+}
+
+variable "use_route53" {
+  description = "Whether to use Route53 for DNS management"
+  type        = bool
+  default     = false
+}
+
+variable "use_cloudfront" {
+  description = "Whether to use CloudFront in front of ALB"
+  type        = bool
+  default     = true
+}
+
+variable "cloudfront_price_class" {
+  description = "The price class for CloudFront distribution"
+  type        = string
+  default     = "PriceClass_100"
 }
 
 variable "vpc_id" {
@@ -298,6 +319,12 @@ variable "private_subnets" {
 variable "public_subnets" {
   description = "List of public subnet IDs"
   type        = list(string)
+}
+
+variable "private_subnets_cidr_blocks" {
+  description = "CIDR blocks of the private subnets"
+  type        = list(string)
+  default     = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] # Default private address spaces
 }
 
 variable "disable_swagger_page" {

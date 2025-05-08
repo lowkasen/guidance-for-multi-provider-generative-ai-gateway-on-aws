@@ -7,6 +7,7 @@ Project ACTIVE as of Feb 15, 2025
 - [Project Overview](#project-overview)
 - [Architecture](#architecture)
 - [AWS Services in this Guidance](#aws-services-in-this-Guidance)
+- [Distribution Options](#distribution-options)
 - [Cost](#cost)
    - [Cost Considerations](#cost-considerations)
    - [Cost Components](#cost-components)
@@ -27,7 +28,7 @@ If you are unfamiliar with LiteLLM, it provides a consistent interface to access
 
 ## Architecture
 
-![Reference Architecture Diagram ECS EKS](./media/Reference_architecture_ECS_EKS_platform_combined.jpg)
+![Reference Architecture Diagram ECS EKS](./media/architecture.png)
 
 ### Architecture steps
 
@@ -38,7 +39,154 @@ If you are unfamiliar with LiteLLM, it provides a consistent interface to access
 5. External model providers providers (OpenAI, Anthropic, Vertex AI etc.) are configured using LiteLLM Admin UI to enable additional LLM model access via unified application interface. Pre-existing configurations of third-party providers are integrated into the Gateway using LiteLLM APIs.
 6. LiteLLM integrates with [Amazon ElastiCache (Redis OSS)](https://aws.amazon.com/elasticache/), [Amazon Relational Database Service (RDS)](https://aws.amazon.com/rds/), and [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/) services. Amazon ElastiCache enables multi-tenant distribution of application settings and prompt caching. Amazon RDS enables persistence of virtual API keys and other configuration settings provided by LiteLLM. AWS Secrets Manager stores external model provider credentials and other sensitive settings securely.
 7. LiteLLM and the API/middleware store application logs in the dedicated [Amazon S3](https://aws.amazon.com/s3) storage bucket for troubleshooting and access analysis.
-   
+
+## Distribution Options
+
+Starting with version 1.1.0, this solution supports flexible deployment scenarios to meet various security and accessibility requirements. You can customize how your LiteLLM gateway is accessed based on your specific needs.
+
+### Deployment Scenarios
+
+#### Scenario 1: Default - Public with CloudFront (Recommended)
+```bash
+USE_CLOUDFRONT="true"
+USE_ROUTE53="false"
+PUBLIC_LOAD_BALANCER="true"
+```
+
+**Why choose this scenario:**
+- Global performance with low-latency access via CloudFront's edge locations
+- Enhanced security with AWS Shield Standard DDoS protection
+- Simplified HTTPS management with CloudFront's default certificate
+- Best option for public-facing AI services with global user base
+
+**Security:**
+- CloudFront IP filtering restricts ALB access to only CloudFront traffic
+- WAF can be applied at the CloudFront level (requires global WAF)
+- Simpler certificate management using CloudFront's default certificate
+
+**Access URL:** `https://d1234abcdef.cloudfront.net`
+
+#### Scenario 2: Custom Domain with CloudFront
+```bash
+USE_CLOUDFRONT="true"
+USE_ROUTE53="true"
+PUBLIC_LOAD_BALANCER="true"
+HOSTED_ZONE_NAME="example.com"
+RECORD_NAME="genai"
+CERTIFICATE_ARN="arn:aws:acm:region:account:certificate/certificate-id"
+```
+
+**Why choose this scenario:**
+- Brand consistency with your custom domain
+- Professional appearance and SEO benefits
+- Same global performance and security as Scenario 1
+
+**Additional requirements:**
+- Route53 hosted zone for your domain
+- ACM certificate for your domain (must be in us-east-1 for CloudFront)
+
+**Access URL:** `https://genai.example.com`
+
+#### Scenario 3: Direct ALB Access (No CloudFront)
+```bash
+USE_CLOUDFRONT="false"
+USE_ROUTE53="true"
+PUBLIC_LOAD_BALANCER="true"
+HOSTED_ZONE_NAME="example.com"
+RECORD_NAME="genai"
+CERTIFICATE_ARN="arn:aws:acm:region:account:certificate/certificate-id"
+```
+
+**Why choose this scenario:**
+- Lower latency for single-region deployments
+- Simplified architecture without CloudFront 
+- Regional WAF can be directly applied to the ALB
+- Cost savings by eliminating CloudFront distribution
+
+**Security considerations:**
+- No CloudFront layer means direct internet exposure of ALB
+- WAF protection becomes particularly important
+- ALB security group allows traffic from all IPs (0.0.0.0/0)
+
+**Access URL:** `https://genai.example.com` (points directly to ALB)
+
+#### Scenario 4: Private VPC Only
+```bash
+USE_CLOUDFRONT="false"
+USE_ROUTE53="true"
+PUBLIC_LOAD_BALANCER="false"
+HOSTED_ZONE_NAME="example.internal"  # Often a private .internal domain
+RECORD_NAME="genai"
+CERTIFICATE_ARN="arn:aws:acm:region:account:certificate/certificate-id"
+```
+
+**Why choose this scenario:**
+- Maximum security for internal enterprise applications
+- Complete isolation from public internet
+- Suitable for processing sensitive or proprietary data
+
+**Access methods:**
+- VPN connection to the VPC
+- AWS Direct Connect
+- VPC peering with corporate network
+- Transit Gateway
+
+**Security considerations:**
+- No public internet access possible
+- ALB security group only allows traffic from private subnet CIDRs
+- Requires network connectivity to the VPC for access
+
+**Access URL:** `https://genai.example.internal` (resolves only within VPC or connected networks)
+
+### Configuration Quick Reference
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `USE_CLOUDFRONT` | `true` | Enables CloudFront distribution for global delivery |
+| `USE_ROUTE53` | `false` | Enables Route53 for custom domain support |
+| `PUBLIC_LOAD_BALANCER` | `true` | Deploys ALB in public subnets |
+| `CLOUDFRONT_PRICE_CLASS` | `PriceClass_100` | CloudFront price class (100/200/All) |
+| `HOSTED_ZONE_NAME` | `""` | Route53 hosted zone name for custom domain |
+| `RECORD_NAME` | `""` | Record to create in Route53 (subdomain) |
+| `CERTIFICATE_ARN` | `""` | ARN of ACM certificate for custom domain |
+
+### Security Considerations
+
+Each deployment scenario offers different security characteristics:
+
+1. **CloudFront with public ALB (Default)**: 
+   - ALB is in public subnets but protected by custom header authentication
+   - Only traffic with the proper CloudFront secret header is allowed (except health check paths)
+   - CloudFront provides an additional security layer with AWS Shield Standard DDoS protection
+   - Best balance of accessibility and security for public services
+
+2. **Direct ALB access (No CloudFront)**:
+   - ALB directly accessible from internet
+   - WAF protection is crucial for this deployment
+   - Consider IP-based restrictions if possible
+
+3. **Private VPC deployment**:
+   - Highest security, no direct internet exposure
+   - Requires VPN or Direct Connect for access
+   - Consider for sensitive workloads or internal services
+
+All scenarios maintain security best practices including:
+- HTTPS for all communications with TLS 1.2+ 
+- Security groups with principle of least privilege
+- WAF protection against common attacks
+- IAM roles with appropriate permissions
+
+### CloudFront Authentication
+
+When using CloudFront, a custom security mechanism is implemented:
+
+1. CloudFront adds a secret header (`X-CloudFront-Secret`) to all requests sent to the ALB
+2. The ALB has listener rules that verify this header before allowing access
+3. Health check paths are specifically exempted to allow CloudFront origin health checks
+4. The secret is stable across deployments (won't change unless explicitly changed)
+
+This provides a robust defense against direct ALB access even if someone discovers your ALB's domain name. The secret is only displayed once after creation in the Terraform outputs and is marked as sensitive.
+
 ### AWS Services in this Guidance
 
 | **AWS Service**                                                                                         | **Role**           | **Description**                                                                                             |
@@ -51,10 +199,11 @@ If you are unfamiliar with LiteLLM, it provides a consistent interface to access
 | [Amazon Web Applications Firewall](https://aws.amazon.com/waf/) (WAF)                | Core Service       | Protect guidance applications from common exploits                                                          |
 | [Amazon Elastic Container Registry](http://aws.amazon.com/ecr/) (ECR)                | Supporting service | Stores and manages Docker container images for EKS deployments.                                             |
 | [Elastic Load Balancer](https://aws.amazon.com/elasticloadbalancing/) (ALB)          | Supporting service | Distributes incoming traffic across multiple targets in the EKS cluster.                                    |
+| [Amazon CloudFront](https://aws.amazon.com/cloudfront/)                              | Supporting service | Global content delivery network for improved performance and security.                                      |
 | [Amazon Simple Storage Service ](https://aws.amazon.com/s3) (S3)                     | Supporting service | Provides persistent object storage for Applications logs and other related data.                            |
 | [Amazon Relational Database Service ](https://aws.amazon.com/rds/) (RDS)             | Supporting service | Enables persistence of virtual API keys and other configuration settings provided by LiteLLM.               |
 | [Amazon ElastiCache Service (Redis OSS) ](https://aws.amazon.com/elasticache/) (OSS) | Supporting service | Enables multi-tenant distribution of application settings and prompt caching.                               |
-| [AWS Route 53](https://aws.amazon.com/route53/)                                      | Supporting Service | Routes users to the guidance application via DNS records                                                    |
+| [AWS Route 53](https://aws.amazon.com/route53/)                                      | Supporting Service | Optional DNS service for custom domain management                                                           |
 | [AWS Identity and Access Management](https://aws.amazon.com/iam/) (IAM)              | Supporting service | Manages access to AWS services and resources securely, including ECS or EKS cluster access.                 |
 | [AWS Certificate Manager](https://aws.amazon.com/certificate-manager/) (ACM)         | Security service   | Manages SSL/TLS certificates for secure communication within the cluster.                                   |
 | [Amazon CloudWatch](https://aws.amazon.com/cloudwatch/)                              | Monitoring service | Collects and tracks metrics, logs, and events from ECS, EKS and other AWS resources provisoned in the guidance   |
@@ -118,8 +267,8 @@ While this implementation guide provides default configurations, customers are r
 
 Customers should regularly review their AWS service usage patterns, adjust configurations as needed, and leverage AWS cost management tools to optimize their spending.
 
-We recommend creating a [budget](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-create.html) 
-through [AWS Cost Explorer](http://aws.amazon.com/aws-cost-management/aws-cost-explorer/) to
+We recommend creating a [budget](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-create.html) 
+through [AWS Cost Explorer](http://aws.amazon.com/aws-cost-management/aws-cost-explorer/) to
 help manage costs. Prices are subject to change and also depend on model provider usage patterns/volume of data. For full details, please refer to the pricing webpage for each AWS service used in this guidance.
 
 ### Sample Cost tables
@@ -268,6 +417,4 @@ For detailed information about the open source libraries used in this applicatio
 
 ## Notices 
 
-Customers are responsible for making their own independent assessment of the information in this Guidance. This Guidance: (a) is for informational purposes only, (b) represents AWS current product offerings and practices, which are subject to change without notice, and (c) does not create any commitments or assurances from AWS and its affiliates, suppliers or licensors. AWS products or services are provided “as is” without warranties, representations, or conditions of any kind, whether express or implied. AWS responsibilities and liabilities to its customers are controlled by AWS agreements, and this Guidance is not part of, nor does it modify, any agreement between AWS and its customers.
-
-
+Customers are responsible for making their own independent assessment of the information in this Guidance. This Guidance: (a) is for informational purposes only, (b) represents AWS current product offerings and practices, which are subject to change without notice, and (c) does not create any commitments or assurances from AWS and its affiliates, suppliers or licensors. AWS products or services are provided "as is" without warranties, representations, or conditions of any kind, whether express or implied. AWS responsibilities and liabilities to its customers are controlled by AWS agreements, and this Guidance is not part of, nor does it modify, any agreement between AWS and its customers.

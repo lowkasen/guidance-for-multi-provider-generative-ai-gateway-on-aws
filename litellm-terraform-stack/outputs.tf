@@ -18,9 +18,21 @@ output "eks_deployment_name" {
   value       = try(module.eks_cluster[0].eks_deployment_name, "")
 }
 
+output "cloudfront_distribution_id" {
+  description = "The ID of the CloudFront distribution"
+  value       = var.use_cloudfront ? try(module.ecs_cluster[0].cloudfront_distribution_id, "") : ""
+}
+
+output "cloudfront_domain_name" {
+  description = "The domain name of the CloudFront distribution"
+  value       = var.use_cloudfront ? try(module.ecs_cluster[0].cloudfront_domain_name, "") : ""
+}
+
 output "ServiceURL" {
-  description = "Equivalent to https://var.record_name"
-  value       = "https://${var.record_name}"
+  description = "The service URL"
+  value = var.use_route53 ? "https://${var.record_name}.${var.hosted_zone_name}" : (
+    var.use_cloudfront ? "https://${try(module.ecs_cluster[0].cloudfront_domain_name, "")}" : "https://${try(module.ecs_cluster[0].alb_dns_name, "")}"
+  )
 }
 
 output "vpc_id" {
@@ -31,4 +43,12 @@ output "vpc_id" {
 output "ConfigBucketName" {
   description = "The Name of the configuration bucket"
   value       = module.base.ConfigBucketName
+}
+
+# Added to expose the CloudFront authentication secret once after creation
+# This allows for troubleshooting and verification if needed
+output "cloudfront_auth_secret" {
+  description = "The CloudFront authentication secret (only shown once after creation)"
+  value       = var.use_cloudfront ? try(module.ecs_cluster[0].cloudfront_auth_secret, null) : null
+  sensitive   = true
 }
