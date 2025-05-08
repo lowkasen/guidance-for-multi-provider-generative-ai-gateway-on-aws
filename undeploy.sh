@@ -205,6 +205,9 @@ export TF_VAR_disable_swagger_page=$DISABLE_SWAGGER_PAGE
 export TF_VAR_disable_admin_ui=$DISABLE_ADMIN_UI
 export TF_VAR_langfuse_public_key=$LANGFUSE_PUBLIC_KEY
 export TF_VAR_langfuse_secret_key=$LANGFUSE_SECRET_KEY
+export TF_VAR_use_route53=$USE_ROUTE53
+export TF_VAR_use_cloudfront=$USE_CLOUDFRONT
+export TF_VAR_cloudfront_price_class=$CLOUDFRONT_PRICE_CLASS
 
 if [ -n "${LANGFUSE_HOST}" ]; then
     export TF_VAR_langfuse_host=$LANGFUSE_HOST
