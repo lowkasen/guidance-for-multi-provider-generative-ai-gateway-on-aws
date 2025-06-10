@@ -444,26 +444,6 @@ resource "aws_lb_listener_rule" "health_check_exception_http" {
   }
 }
 
-# CloudFront authentication rule for HTTP
-resource "aws_lb_listener_rule" "cloudfront_auth_http" {
-  count        = var.use_cloudfront ? 1 : 0
-  listener_arn = aws_lb_listener.http.arn
-  priority     = 5  # Second priority, after health checks
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.tg_4000.arn
-  }
-
-  # Check for the CloudFront secret header
-  condition {
-    http_header {
-      http_header_name = "X-CloudFront-Secret"
-      values           = ["litellm-cf-${random_password.cloudfront_secret[0].result}"]
-    }
-  }
-}
-
 # Duplicate all path-specific rules for the HTTP listener with header authentication
 
 # bedrock model for HTTP
