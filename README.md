@@ -1,7 +1,5 @@
 # Guidance for Multi-Provider Generative AI Gateway on AWS
 
-Project ACTIVE as of Feb 15, 2025
-
 ## Table of contents
 
 - [Project Overview](#project-overview)
