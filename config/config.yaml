@@ -33,6 +33,9 @@ router_settings:
 environment_variables:
   STORE_MODEL_IN_DB: "True"
   LITELLM_LOG: "DEBUG"
+general_settings:
+  store_model_in_db: true
+  store_prompts_in_spend_logs: true
 litellm_settings:
   cache: True
   debug: True
