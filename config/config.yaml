@@ -49,7 +49,7 @@ litellm_settings:
   budget_duration: 1mo # (str) frequency of budget reset - You can set duration as seconds ("30s"), minutes ("30m"), hours ("30h"), days ("30d"), months ("1mo").
   max_internal_user_budget: 1000000000.0 # (float) sets default budget in dollars for each internal user. (Doesn't apply to Admins. Doesn't apply to Teams. Doesn't apply to master key)
   internal_user_budget_duration: "1mo" # (str) frequency of budget reset - You can set duration as seconds ("30s"), minutes ("30m"), hours ("30h"), days ("30d"), months ("1mo").
-  success_callback: ["s3"]
+  success_callback: ["s3", "langfuse"]
   failure_callback: ["s3"]
   service_callback: ["s3"]
   s3_callback_params:
